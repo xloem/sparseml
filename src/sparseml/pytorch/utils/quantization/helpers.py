@@ -372,6 +372,7 @@ def get_qat_qconfig(
     symmetric_activations: bool = False,
     symmetric_weights: bool = True,
     reduce_range: bool = False,
+    activation_kwargs = False,
 ) -> "torch.quantization.QConfig":
     """
     :param symmetric_activations: if True, activations will have a symmetric
@@ -391,13 +392,17 @@ def get_qat_qconfig(
     activation_qscheme = (
         torch.per_tensor_symmetric if symmetric_activations else torch.per_tensor_affine
     )
-    activation_observer = torch_quantization.FakeQuantize.with_args(
+    activation_observer_kwargs = dict(
         observer=torch_quantization.MovingAverageMinMaxObserver,
         quant_min=0,
         quant_max=255,
         dtype=torch.quint8,
         qscheme=activation_qscheme,
         reduce_range=reduce_range,
+    )
+    activation_observer_kwargs.update(activation_kwargs)
+    activation_observer = torch_quantization.FakeQuantize.with_args(
+        **activation_observer_kwargs
     )
     weight_qscheme = (
         torch.per_tensor_symmetric if symmetric_weights else torch.per_tensor_affine
