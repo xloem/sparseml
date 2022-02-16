@@ -32,7 +32,7 @@ training_modifiers:
     end_epoch: 200
     lr_func: cosine
     init_lr: 0.256
-    final_lr: 0.0512
+    final_lr: 0.0
   
 pruning_modifiers:
   - !ACDCPruningModifier
