@@ -348,12 +348,14 @@ def create_scheduled_optimizer(
     manager = ScheduledModifierManager.from_yaml(
         file_path=train_args.recipe_path, add_modifiers=add_mods
     )
+    calibration_dataloader = deepcopy(train_loader)
     optim = ScheduledOptimizer(
         optim,
         model,
         manager,
         steps_per_epoch=len(train_loader),
         loggers=loggers,
+        initialize_kwargs=dict(calibration_dataloader=calibration_dataloader),
     )
     print(f"created manager: {manager}")
     return epoch, optim, manager
