@@ -1,0 +1,110 @@
+version: 1.1.0
+
+num_epochs_0: &num_epochs_0 0
+num_epochs_1: &num_epochs_1 200
+num_epochs_2: &num_epochs_2 300
+num_epochs_3: &num_epochs_3 400
+num_epochs_4: &num_epochs_4 500
+num_epochs_5: &num_epochs_5 600
+num_epochs_warmup: &num_epochs_warmup 5
+
+sparsity_1: &sparsity_1 0.80
+sparsity_2: &sparsity_2 0.85
+sparsity_3: &sparsity_3 0.90
+sparsity_4: &sparsity_4 0.95
+sparsity_5: &sparsity_5 0.96
+
+lr_0: &lr_0 0.0512
+lr_1: &lr_1 0.0.256
+lr_2: &lr_2 0.0
+
+update_frequency: &update_frequency 5
+momentum_buffer_reset: &momentum_buffer_reset True
+params: &params ['re:.*conv*', 're:.*fc.weight*']
+global_sparsity: &global_sparsity True
+
+
+modifiers:
+    - !EpochRangeModifier
+        end_epoch: *num_epochs_5
+        start_epoch: *num_epochs_0
+
+    - !LearningRateFunctionModifier
+        cycle_epochs: 1.0
+        end_epoch: *num_epochs_warmup
+        final_lr: *lr_1
+        init_lr: *lr_0
+        log_types: __ALL__
+        lr_func: linear
+        start_epoch: *num_epochs_0
+        update_frequency: -1.0
+
+    - !LearningRateFunctionModifier
+        cycle_epochs: 1.0
+        end_epoch: *num_epochs_5
+        final_lr: *lr_2
+        init_lr: *lr_1
+        log_types: __ALL__
+        lr_func: cosine
+        start_epoch: *num_epochs_warmup
+        update_frequency: -1.0
+
+    - !ACDCPruningModifier
+        compression_sparsity: *sparsity_1
+        end_epoch: *num_epochs_1
+        leave_enabled: False
+        log_types: __ALL__
+        mask_type: unstructured
+        momentum_buffer_reset: *momentum_buffer_reset
+        params: *params
+        start_epoch: *num_epochs_warmup
+        update_frequency: *update_frequency
+        global_sparsity: *global_sparsity
+
+    - !ACDCPruningModifier
+        compression_sparsity: *sparsity_2
+        end_epoch: *num_epochs_2
+        leave_enabled: False
+        log_types: __ALL__
+        mask_type: unstructured
+        momentum_buffer_reset: *momentum_buffer_reset
+        params: *params
+        start_epoch: *num_epochs_1
+        update_frequency: *update_frequency
+        global_sparsity: *global_sparsity
+
+    - !ACDCPruningModifier
+        compression_sparsity: *sparsity_3
+        end_epoch: *num_epochs_3
+        leave_enabled: False
+        log_types: __ALL__
+        mask_type: unstructured
+        momentum_buffer_reset: *momentum_buffer_reset
+        params: *params
+        start_epoch: *num_epochs_2
+        update_frequency: *update_frequency
+        global_sparsity: *global_sparsity
+
+    - !ACDCPruningModifier
+        compression_sparsity: *sparsity_4
+        end_epoch: *num_epochs_4
+        leave_enabled: False
+        log_types: __ALL__
+        mask_type: unstructured
+        momentum_buffer_reset: *momentum_buffer_reset
+        params: *params
+        start_epoch: *num_epochs_3
+        update_frequency: *update_frequency
+        global_sparsity: *global_sparsity
+
+    - !ACDCPruningModifier
+        compression_sparsity: *sparsity_5
+        end_epoch: *num_epochs_5
+        leave_enabled: False
+        log_types: __ALL__
+        mask_type: unstructured
+        momentum_buffer_reset: *momentum_buffer_reset
+        params: *params
+        start_epoch: *num_epochs_4
+        update_frequency: *update_frequency
+        global_sparsity: *global_sparsity
