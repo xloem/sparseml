@@ -1,6 +1,6 @@
 
 python integrations/pytorch/train.py \
-    --recipe-path ac_dc_recipe.md \
+    --recipe-path recipe.yaml \
     --train-batch-size 256 \
     --test-batch-size 256 \
     --loader-num-workers 8 \
