@@ -22,6 +22,7 @@ update_frequency: &update_frequency 5
 momentum_buffer_reset: &momentum_buffer_reset True
 params: &params ['re:.*conv*', 're:.*fc.weight*']
 global_sparsity: &global_sparsity True
+leave_enabled: &leave_enabled True
 
 
 modifiers:
@@ -52,7 +53,7 @@ modifiers:
     - !ACDCPruningModifier
         compression_sparsity: *sparsity_1
         end_epoch: *num_epochs_1
-        leave_enabled: False
+        leave_enabled: *leave_enabled
         log_types: __ALL__
         mask_type: unstructured
         momentum_buffer_reset: *momentum_buffer_reset
@@ -64,7 +65,7 @@ modifiers:
     - !ACDCPruningModifier
         compression_sparsity: *sparsity_2
         end_epoch: *num_epochs_2
-        leave_enabled: False
+        leave_enabled: *leave_enabled
         log_types: __ALL__
         mask_type: unstructured
         momentum_buffer_reset: *momentum_buffer_reset
@@ -76,7 +77,7 @@ modifiers:
     - !ACDCPruningModifier
         compression_sparsity: *sparsity_3
         end_epoch: *num_epochs_3
-        leave_enabled: False
+        leave_enabled: *leave_enabled
         log_types: __ALL__
         mask_type: unstructured
         momentum_buffer_reset: *momentum_buffer_reset
@@ -88,7 +89,7 @@ modifiers:
     - !ACDCPruningModifier
         compression_sparsity: *sparsity_4
         end_epoch: *num_epochs_4
-        leave_enabled: False
+        leave_enabled: *leave_enabled
         log_types: __ALL__
         mask_type: unstructured
         momentum_buffer_reset: *momentum_buffer_reset
@@ -100,7 +101,7 @@ modifiers:
     - !ACDCPruningModifier
         compression_sparsity: *sparsity_5
         end_epoch: *num_epochs_5
-        leave_enabled: False
+        leave_enabled: *leave_enabled
         log_types: __ALL__
         mask_type: unstructured
         momentum_buffer_reset: *momentum_buffer_reset
