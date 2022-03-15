@@ -411,7 +411,6 @@ def main():
     # See more about loading any type of standard or custom dataset (from files,
     # python dict, pandas DataFrame, etc) at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
-
     # Load extra dataset if specified, and concatenate with the original one
     if data_args.dataset_name_2 is not None:
         # Downloading and loading a dataset from the hub.
@@ -433,13 +432,8 @@ def main():
                 split=f"train[{data_args.validation_split_percentage}%:]",
                 cache_dir=model_args.cache_dir,
             )
-
-        # Concatenate two datasets
-        if datasets is not None:
-            for split in ["validation", "train"]:
-                raw_datasets[split] = concatenate_datasets(
-                    [raw_datasets[split], raw_datasets_2[split]]
-                )
+    else:
+        raw_datasets_2 = None
 
     # Load pretrained model and tokenizer
     #
@@ -501,6 +495,7 @@ def main():
         },
     )
 
+    # Tuan: Need to do the same for teacher?
     model.resize_token_embeddings(len(tokenizer))
 
     # Preprocessing the datasets.
@@ -510,6 +505,13 @@ def main():
     else:
         column_names = raw_datasets["validation"].column_names
     text_column_name = "text" if "text" in column_names else column_names[0]
+
+    if raw_datasets_2 is not None:
+        if training_args.do_train:
+            column_names_2 = raw_datasets_2["train"].column_names
+        else:
+            column_names_2 = raw_datasets_2["validation"].column_names
+        text_column_name_2 = "text" if "text" in column_names_2 else column_names_2[0]
 
     if data_args.max_seq_length is None:
         max_seq_length = tokenizer.model_max_length
@@ -580,6 +582,22 @@ def main():
                 desc="Running tokenizer on every text in dataset",
             )
 
+        if raw_datasets_2 is not None:
+            def tokenize_function_2(examples):
+                return tokenizer(
+                    examples[text_column_name_2], return_special_tokens_mask=True
+                )
+
+            tokenized_datasets_2 = raw_datasets_2.map(
+                tokenize_function_2,
+                batched=True,
+                num_proc=data_args.preprocessing_num_workers,
+                remove_columns=column_names_2,
+                load_from_cache_file=not data_args.overwrite_cache,
+            )
+        else:
+            tokenized_datasets_2 = None
+            
         # Main data processing function that will concatenate all texts from our
         # dataset and generate chunks of max_seq_length.
         def group_texts(examples):
@@ -618,6 +636,19 @@ def main():
                 load_from_cache_file=not data_args.overwrite_cache,
                 desc=f"Grouping texts in chunks of {max_seq_length}",
             )
+
+        if tokenized_datasets_2 is not None:
+            tokenized_datasets_2 = tokenized_datasets_2.map(
+                group_texts,
+                batched=True,
+                num_proc=data_args.preprocessing_num_workers,
+                load_from_cache_file=not data_args.overwrite_cache,
+            )
+            for split in ["validation", "train"]:
+                tokenized_datasets[split] = concatenate_datasets(
+                    [tokenized_datasets[split], tokenized_datasets_2[split]]
+                )
+
 
     if training_args.do_train:
         if "train" not in tokenized_datasets:
