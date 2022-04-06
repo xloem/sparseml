@@ -330,7 +330,6 @@ class DistillationModifier(ScheduledUpdateModifier):
             (calculate batch number using this and epoch)
         :return: loss tensor with knowledge distillation loss added
         """
-        import pdb; pdb.set_trace()
         loss = super().loss_update(
             loss, module, optimizer, epoch, steps_per_epoch, **kwargs
         )
@@ -388,7 +387,6 @@ class DistillationModifier(ScheduledUpdateModifier):
             total_loss = ((1.0 - self._hardness) * loss) + (
                 self._hardness * teacher_loss
             )
-            
             self._loss_terms.update(
                 {
                     "teacher_loss": teacher_loss,
@@ -396,7 +394,6 @@ class DistillationModifier(ScheduledUpdateModifier):
                 }
             )
         else:
-            assert False, "Should not be here for now"
             kldiv_output_loss = (
                 self._kldiv_output_loss(student_outputs, teacher_outputs)
                 if self.alpha_ce > 0.0

@@ -342,7 +342,7 @@ class RecipeManagerTrainerInterface:
         # through the model. As an example, the ModifierDistillation indicates requests for
         # hidden_states or attention as part of the model outputs
         inputs = self.manager.prepare_inputs(inputs)
-        import pdb; pdb.set_trace()
+
         student_inputs = {k: inputs[k] for k in inputs if k in self._model_signature_columns}
         student_outputs = model(**student_inputs)
 
