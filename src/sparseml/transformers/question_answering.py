@@ -419,6 +419,7 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
+    import pdb; pdb.set_trace()
     if model_args.distill_teacher is not None:
         tokenizer = AutoTokenizer.from_pretrained(
             model_args.distill_teacher,
@@ -493,6 +494,7 @@ def main():
             q.lstrip() for q in examples[question_column_name]
         ]
 
+        import pdb; pdb.set_trace()
         # Tokenize our examples with truncation and maybe padding, but keep the
         # overflows using a stride. This results in one example possible giving
         # several features when a context is long, each of those features having a
@@ -585,6 +587,7 @@ def main():
         if data_args.max_train_samples is not None:
             # We will select sample from whole data if argument is specified
             train_dataset = train_dataset.select(range(data_args.max_train_samples))
+        import pdb; pdb.set_trace()
         # Create train feature from dataset
         with training_args.main_process_first(desc="train dataset map pre-processing"):
             train_dataset = train_dataset.map(

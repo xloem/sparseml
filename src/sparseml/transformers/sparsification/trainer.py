@@ -24,6 +24,8 @@ import math
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import inspect
+
 import torch
 from torch import distributed as dist
 from torch.nn import Module
@@ -139,6 +141,16 @@ class RecipeManagerTrainerInterface:
         self.grad_sampler = GradSampler(
             self._mfac_data_loader(), self._mfac_loss_function
         )
+
+        model_signature = inspect.signature(self.model.forward)
+        self._model_signature_columns = list(model_signature.parameters.keys())
+
+        if self.teacher is not None:
+            teacher_signature = inspect.signature(self.teacher.forward)
+            self._teacher_signature_columns = list(teacher_signature.parameters.keys())
+        else:
+            self._teacher_signature_columns = None
+
 
     def apply_manager(self, epoch: float, checkpoint: Optional[str]) -> bool:
         """
@@ -330,8 +342,11 @@ class RecipeManagerTrainerInterface:
         # through the model. As an example, the ModifierDistillation indicates requests for
         # hidden_states or attention as part of the model outputs
         inputs = self.manager.prepare_inputs(inputs)
+        import pdb; pdb.set_trace()
+        student_inputs = {k: inputs[k] for k in inputs if k in self._model_signature_columns}
+        student_outputs = model(**student_inputs)
 
-        student_outputs = model(**inputs)
+        teacher_inputs = {k: inputs[k] for k in inputs if k in self._teacher_signature_columns}
         loss = student_outputs["loss"]
         loss = self.manager.loss_update(
             loss,
@@ -340,7 +355,8 @@ class RecipeManagerTrainerInterface:
             self.state.epoch,
             self.manager_steps_per_epoch,
             student_outputs=student_outputs,
-            student_inputs=inputs,
+            student_inputs=student_inputs,
+            teacher_inputs=teacher_inputs,
         )
 
         return (loss, student_outputs) if return_outputs else loss

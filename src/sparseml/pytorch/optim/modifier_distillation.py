@@ -316,6 +316,7 @@ class DistillationModifier(ScheduledUpdateModifier):
         steps_per_epoch: int,
         student_outputs: Union[Tensor, Dict, Iterable] = None,
         student_inputs: Union[Tensor, Iterable[Tensor], Dict[Any, Tensor]] = None,
+        teacher_inputs: Union[Tensor, Iterable[Tensor], Dict[Any, Tensor]] = None,
         **kwargs,
     ) -> Tensor:
         """
@@ -329,6 +330,7 @@ class DistillationModifier(ScheduledUpdateModifier):
             (calculate batch number using this and epoch)
         :return: loss tensor with knowledge distillation loss added
         """
+        import pdb; pdb.set_trace()
         loss = super().loss_update(
             loss, module, optimizer, epoch, steps_per_epoch, **kwargs
         )
@@ -342,11 +344,14 @@ class DistillationModifier(ScheduledUpdateModifier):
                 "distillation loss update"
             )
 
-        teacher_inputs = (
-            student_inputs
-            if not self._teacher_input_keys
-            else {key: student_inputs[key] for key in self._teacher_input_keys}
-        )
+        if teacher_inputs is None:
+            # For backward compatibility
+            teacher_inputs = (
+                student_inputs
+                if not self._teacher_input_keys
+                else {key: student_inputs[key] for key in self._teacher_input_keys}
+            )
+
         # copy to keep from updating student's inputs
         teacher_inputs = deepcopy(teacher_inputs)
 
@@ -383,6 +388,7 @@ class DistillationModifier(ScheduledUpdateModifier):
             total_loss = ((1.0 - self._hardness) * loss) + (
                 self._hardness * teacher_loss
             )
+            
             self._loss_terms.update(
                 {
                     "teacher_loss": teacher_loss,
@@ -390,6 +396,7 @@ class DistillationModifier(ScheduledUpdateModifier):
                 }
             )
         else:
+            assert False, "Should not be here for now"
             kldiv_output_loss = (
                 self._kldiv_output_loss(student_outputs, teacher_outputs)
                 if self.alpha_ce > 0.0
