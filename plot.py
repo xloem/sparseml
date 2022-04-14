@@ -1,8 +1,7 @@
 import datetime
-
 import matplotlib.pyplot as plt
 
-log = """
+log="""
 TIME:07:39:24 7328
 TIME:07:39:26 7424
 TIME:07:39:28 7424
@@ -43,19 +42,21 @@ TIME:07:40:36 7328
 TIME:07:40:38 7328
 """
 
-no_files_list = time_list = []
+
+no_files_list = []
+time_list = []
 for entry in log.split("\n"):
     if entry:
         no_files = entry.split(" ")[-1]
         time = entry.split(" ")[0][5:]
         no_files_list.append(int(no_files))
-        time_list.append(datetime.datetime.strptime(time, "%H:%M:%S"))
+        time_list.append(datetime.datetime.strptime(time,"%H:%M:%S"))
 
 baseline = no_files_list[0]
 old_limit = 1024 + no_files_list[0]
-new_limit = 1024 * 4 + no_files_list[0]
+new_limit = 1024 * 2 + no_files_list[0]
 plt.axhline(y=baseline, color='r', linestyle='-')
 plt.axhline(y=old_limit, color='g', linestyle='-')
 plt.axhline(y=new_limit, color='b', linestyle='-')
-plt.plot(time_list, no_files_list)
+plt.plot(time_list,no_files_list)
 plt.show()
