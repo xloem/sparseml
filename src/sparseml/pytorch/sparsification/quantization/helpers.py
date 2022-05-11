@@ -253,6 +253,10 @@ class QATWrapper(Module):
         self.input_quant_stubs = torch.nn.ModuleList(
             [torch_quantization.QuantStub() for _ in range(num_input_quant_stubs)]
         )
+        self.input_dequant_stubs = torch.nn.ModuleList(
+            [torch_quantization.QuantStub() for _ in range(num_input_quant_stubs)]
+        )
+
         self.output_quant_stubs = torch.nn.ModuleList(
             [torch_quantization.QuantStub() for _ in range(num_outputs)]
         )
@@ -310,7 +314,8 @@ class QATWrapper(Module):
 
         for idx, output in enumerate(outputs):
             if idx < len(self.output_quant_stubs):
-                output = self.output_quant_stubs[idx](output)
+                if len(self.input_quant_stubs) == 0:
+                    output = self.output_quant_stubs[idx](output)
                 output = self._output_deuant_stubs[idx](output)
             qat_outputs.append(output)
 
