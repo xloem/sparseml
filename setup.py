@@ -163,6 +163,19 @@ def _setup_entry_points() -> Dict:
         ]
     )
 
+    # object detection integration
+
+    entry_points["console_scripts"].extend(
+        [
+            "sparseml.object_detection.export_onnx="
+            "sparseml.pytorch.object_detection.export:main",
+            "sparseml.object_detection.train="
+            "sparseml.pytorch.object_detection.train:main",
+            "sparseml.object_detection.validation="
+            "sparseml.pytorch.object_detection.val:main",
+        ]
+    )
+
     return entry_points
 
 
@@ -195,17 +208,15 @@ setup(
     entry_points=_setup_entry_points(),
     python_requires=">=3.6.0",
     classifiers=[
-        "Development Status :: 3 - Alpha",
-        "Environment :: Console",
+        "Development Status :: 5 - Production/Stable",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3 :: Only",
         "Intended Audience :: Developers",
         "Intended Audience :: Education",
         "Intended Audience :: Information Technology",
         "Intended Audience :: Science/Research",
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: POSIX :: Linux",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3 :: Only",
         "Topic :: Scientific/Engineering",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
         "Topic :: Scientific/Engineering :: Mathematics",
