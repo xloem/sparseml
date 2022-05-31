@@ -994,6 +994,7 @@ def thin_model_from_checkpoint(model: Module, state_dict: Dict[str, Any]):
     for param_name, checkpoint_tens in state_dict.items():
         if not param_name.endswith(".weight"):
             continue  # only deal with weight params of modules
+        print(param_name, checkpoint_tens.name)
         layer_name = param_name[:-7]
         layer = get_layer(layer_name, model)
 
