@@ -36,6 +36,7 @@ all = [
     "box_giou",
     "YoloGrids",
     "postprocess_yolo",
+    "compute_iou",
 ]
 
 
@@ -348,3 +349,21 @@ def postprocess_yolo(
         nms_outputs.append((boxes, labels, scores))
 
     return nms_outputs
+
+def compute_iou(boxes, reference_box):
+    y, x, height, width = boxes
+    ref_y, ref_x, ref_height, ref_width = reference_box
+
+    x1 = torch.max(x - width / 2., ref_x - ref_width / 2.)
+    x2 = torch.min(x + width / 2., ref_x + ref_width / 2.)
+
+    y1 = torch.max(y - height / 2., ref_y - ref_height / 2.)
+    y2 = torch.min(y + height / 2., ref_y + ref_height / 2.)
+
+    intersection = torch.clamp(x2 - x1, min=0.) * torch.clamp(y2 - y1, min=0.)
+
+    area = width * height
+    ref_area = ref_width * ref_height
+    union = area + ref_area - intersection
+
+    return intersection / union
