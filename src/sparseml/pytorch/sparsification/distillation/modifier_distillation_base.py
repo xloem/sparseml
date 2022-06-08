@@ -30,7 +30,6 @@ from torch.optim import Optimizer
 
 from sparseml.optim import BaseModifier, ModifierProp
 from sparseml.pytorch.sparsification.modifier import (
-    PyTorchModifierYAML,
     ScheduledModifier,
     ScheduledUpdateModifier,
 )
@@ -46,7 +45,6 @@ __all__ = [
 _LOGGER = logging.getLogger(__name__)
 
 
-@PyTorchModifierYAML()
 class BaseDistillationModifier(ScheduledUpdateModifier):
     """
     Adds a knowledge distillation loss based on a teacher model during the
@@ -54,21 +52,15 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
     module may be provided as a kwarg to the Manager initialization and
     loss_update(loss) must be called before any backwards pass in the integrated
     training flow. If no teacher model is provided, then self distillation
-    will be used
+    will be used.
+    Specific instances of knowledge distillation can be defined by
+    implementing methods to compute the distillation loss and to combine
+    the distillation loss with other loss terms to compute the total loss.
 
-    | Sample yaml:
-    |   !DistillationModifier
-    |       start_epoch: 0.0
-    |       hardness: 0.5
-    |       temperature: 2.0
-    |       distill_output_keys: [0]
+    Common parameters across different distillation implementations:
 
     :param start_epoch: The epoch to start the modifier at
-    :param hardness: how much to weight the distillation loss vs the base loss
-        (e.g. hardness of 0.6 will return 0.6 * distill_loss + 0.4 * base_loss).
-        Default is 0.5
-    :param temperature: temperature applied to teacher and student softmax for
-        distillation
+    :param end_epoch: The epoch to end the modifier at
     :param distill_output_keys: list of keys for the module outputs to use for
         distillation if multiple outputs are present. None or empty list defaults
         to using all available outputs
@@ -213,7 +205,8 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
         student_outputs: Union[Tensor, Dict, Iterable] = None,
         student_inputs: Union[Tensor, Iterable[Tensor], Dict[Any, Tensor]] = None,
         teacher_inputs: Union[Tensor, Iterable[Tensor], Dict[Any, Tensor]] = None,
-        labels: Union[Tensor, Iterable[Tensor], Dict[Any, Tensor]] = None,
+        student_labels: Union[Tensor, Iterable[Tensor], Dict[Any, Tensor]] = None,
+        teacher_labels: Union[Tensor, Iterable[Tensor], Dict[Any, Tensor]] = None,
         **kwargs,
     ) -> Tensor:
         """
@@ -225,6 +218,14 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
         :param epoch: current epoch and progress within the current epoch
         :param steps_per_epoch: number of steps taken within each epoch
             (calculate batch number using this and epoch)
+        :param student_outputs: predictions resulting from evaluating student
+            model on student inputs
+        :param student_inputs: inputs for student model
+        :param teacher_inputs: inputs for teacher model. If None, will use
+            same inputs as student
+        :param student_labels: labels associated with student input data
+        :param teacher_labels: labels associated with teacher input data.
+            If None, will use student labels.
         :return: loss tensor with knowledge distillation loss added
         """
         loss = super().loss_update(
@@ -247,6 +248,9 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
                 if not self._teacher_input_keys
                 else {key: student_inputs[key] for key in self._teacher_input_keys}
             )
+
+        if teacher_labels is None:
+            teacher_labels = student_labels
 
         # copy to keep from updating student's inputs
         teacher_inputs = deepcopy(teacher_inputs)
@@ -278,7 +282,13 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
                 f"teacher output type of {type(teacher_outputs)}"
             )
 
-        distillation_loss = self.compute_distillation_loss(student_outputs, teacher_outputs, labels)
+        distillation_loss = self.compute_distillation_loss(
+            student_outputs=student_outputs,
+            teacher_outputs=teacher_outputs,
+            student_labels=student_labels,
+            teacher_labels=teacher_labels,
+        )
+
         total_loss = self.compute_total_loss(loss, distillation_loss)
         self._logged_loss_terms.update(
             {"distillation_loss": distillation_loss, "total_loss": total_loss}
@@ -376,4 +386,3 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
 
     def compute_total_loss(self, loss, distillation_loss):
         raise NotImplementedError()
-
