@@ -20,15 +20,19 @@ Modifier for performing model distillation
 import logging
 from typing import Any, List
 
-from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import BaseDistillationModifier
 from sparseml.optim import ModifierProp
+from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
+    BaseDistillationModifier,
+)
 from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
+
 
 __all__ = [
     "DistillationModifier",
 ]
 
 _LOGGER = logging.getLogger(__name__)
+
 
 @PyTorchModifierYAML()
 class DistillationModifier(BaseDistillationModifier):
@@ -48,28 +52,29 @@ class DistillationModifier(BaseDistillationModifier):
     |       distill_output_keys: [0]
 
     :param start_epoch: The epoch to start the modifier at
-    :param hardness: how much to weight the distillation loss vs the base loss
-        (e.g. hardness of 0.6 will return 0.6 * distill_loss + 0.4 * base_loss).
-        Default is 0.5
-    :param temperature: temperature applied to teacher and student softmax for
-        distillation
+    :param end_epoch: The epoch to end the modifier at
     :param distill_output_keys: list of keys for the module outputs to use for
         distillation if multiple outputs are present. None or empty list defaults
         to using all available outputs
     :param teacher_input_keys: list of keys to filter the inputs by before
         passing into the teacher. None or empty list defaults to using
         all available inputs
+    :param hardness: how much to weight the distillation loss vs the base loss
+        (e.g. hardness of 0.6 will return 0.6 * distill_loss + 0.4 * base_loss).
+        Default is 0.5
+    :param temperature: temperature applied to teacher and student softmax for
+        distillation
     """
 
     def __init__(
         self,
         start_epoch: float = -1.0,
         end_epoch: float = -1.0,
-        hardness: float = 0.5,
-        temperature: float = 2.0,
         distill_output_keys: List[Any] = None,
         teacher_input_keys: List[Any] = None,
         update_frequency: float = -1.0,
+        hardness: float = 0.5,
+        temperature: float = 2.0,
     ):
         super().__init__(
             start_epoch=start_epoch,
@@ -118,4 +123,3 @@ class DistillationModifier(BaseDistillationModifier):
 
     def compute_total_loss(self, loss, distillation_loss):
         return ((1.0 - self.hardness) * loss) + (self.hardness * distillation_loss)
-
