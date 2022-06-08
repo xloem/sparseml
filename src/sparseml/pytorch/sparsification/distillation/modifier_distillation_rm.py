@@ -19,10 +19,16 @@ Modifier for performing model distillation
 
 import logging
 from typing import Any, List
+import torch
 
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import BaseDistillationModifier
 from sparseml.optim import ModifierProp
 from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
+from sparseml.pytorch.object_detection import MatchAnchorIOU
+
+_POSITIVE_BOX_METHODS = {
+    "match_anchor_iou": MatchAnchorIOU,
+}
 
 
 __all__ = [
@@ -50,11 +56,13 @@ class RankMimickingModifier(BaseDistillationModifier):
     |       distill_output_keys: [0]
 
     :param start_epoch: The epoch to start the modifier at
-    :param hardness: how much to weight the distillation loss vs the base loss
-        (e.g. hardness of 0.6 will return 0.6 * distill_loss + 0.4 * base_loss).
-        Default is 0.5
+    :param end_epoch: The epoch to start the modifier at
+    :param gain:
     :param temperature: temperature applied to teacher and student softmax for
         distillation
+    :param positive_box_method:
+    :param positive_box_method_args:
+    :param scale_with_batch_size:
     :param distill_output_keys: list of keys for the module outputs to use for
         distillation if multiple outputs are present. None or empty list defaults
         to using all available outputs
@@ -65,14 +73,16 @@ class RankMimickingModifier(BaseDistillationModifier):
 
     def __init__(
         self,
-        number_of_classes: int,
         start_epoch: float = -1.0,
         end_epoch: float = -1.0,
-        gain: float = 0.5,
-        temperature: float = 2.0,
         distill_output_keys: List[Any] = None,
         teacher_input_keys: List[Any] = None,
         update_frequency: float = -1.0,
+        gain: float = 4.0,
+        temperature: float = 2.0,
+        positive_box_method: str = "match_anchor_iou",
+        positive_box_method_args: Any = None,
+        scale_with_batch_size: bool = True,
     ):
         super().__init__(
             start_epoch=start_epoch,
@@ -81,17 +91,10 @@ class RankMimickingModifier(BaseDistillationModifier):
             teacher_input_keys=teacher_input_keys,
             update_frequency=update_frequency,
         )
-        self._number_of_classes = number_of_classes
-        self._gain = gain
-        self._temperature = temperature
-
-    @ModifierProp()
-    def number_of_classes(self) -> int:
-        return self._number_of_classes
-
-    @number_of_classes.setter
-    def number_of_classes(self, value: int):
-        self._number_of_classes = value
+        self.gain = gain
+        self.temperature = temperature
+        self.scale_with_batch_size = scale_with_batch_size
+        self._positive_outputs = _POSITIVE_BOX_METHODS[positive_box_method](**positive_box_method_args)
 
     @ModifierProp()
     def gain(self) -> float:
@@ -123,12 +126,26 @@ class RankMimickingModifier(BaseDistillationModifier):
         """
         self._temperature = value
 
-    def compute_distillation_loss(self, student_outputs, teacher_outputs, labels):
+    @ModifierProp()
+    def scale_with_batch_size(self) -> bool:
+        return self._scale_with_batch_size
 
-        return self._kldiv_output_loss(student_outputs, teacher_outputs)
+    @scale_with_batch_size.setter
+    def scale_with_batch_size(self, value: bool):
+        self._scale_with_batch_size = value
+
+    def compute_distillation_loss(self, student_outputs, teacher_outputs, student_labels, **kwargs):
+        distillation_loss = 0.
+        for target in student_labels:
+            positive_student_outputs, positive_teacher_outputs = self._positive_outputs(student_outputs, teacher_outputs, target)
+            if positive_student_outputs is not None and positive_teacher_outputs is not None:
+                distillation_loss += self._kldiv_output_loss(positive_student_outputs, positive_teacher_outputs)
+
+        if self.scale_with_batch_size:
+            batch_size = student_outputs[0].shape[0]
+            distillation_loss *= batch_size
+
+        return distillation_loss
 
     def compute_total_loss(self, loss, distillation_loss):
         return loss + self.gain * distillation_loss
-
-    def _split_outputs(self, outputs):
-        return outputs.split((2, 2, 1, self.number_of_classes))
