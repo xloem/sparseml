@@ -20,20 +20,15 @@ Modifier for performing model distillation
 import logging
 from typing import Any, List
 
+from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import BaseDistillationModifier
 from sparseml.optim import ModifierProp
-from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
-    BaseDistillationModifier,
-    kldiv_loss,
-)
 from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
-
 
 __all__ = [
     "DistillationModifier",
 ]
 
 _LOGGER = logging.getLogger(__name__)
-
 
 @PyTorchModifierYAML()
 class DistillationModifier(BaseDistillationModifier):
@@ -120,7 +115,8 @@ class DistillationModifier(BaseDistillationModifier):
         self._temperature = value
 
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
-        return kldiv_loss(student_outputs, teacher_outputs, self.temperature, self._distill_output_keys)
+        return self._kldiv_output_loss(student_outputs, teacher_outputs)
 
     def compute_total_loss(self, loss, distillation_loss):
         return ((1.0 - self.hardness) * loss) + (self.hardness * distillation_loss)
+
