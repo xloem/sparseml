@@ -19,12 +19,14 @@ Modifier for performing model distillation
 
 import logging
 from typing import Any, List
-import torch
 
-from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import BaseDistillationModifier
 from sparseml.optim import ModifierProp
-from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
 from sparseml.pytorch.object_detection import MatchAnchorIOU
+from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
+    BaseDistillationModifier,
+)
+from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
+
 
 _POSITIVE_BOX_METHODS = {
     "match_anchor_iou": MatchAnchorIOU,
@@ -37,6 +39,7 @@ __all__ = [
 
 
 _LOGGER = logging.getLogger(__name__)
+
 
 @PyTorchModifierYAML()
 class RankMimickingModifier(BaseDistillationModifier):
@@ -94,7 +97,9 @@ class RankMimickingModifier(BaseDistillationModifier):
         self.gain = gain
         self.temperature = temperature
         self.scale_with_batch_size = scale_with_batch_size
-        self._positive_outputs = _POSITIVE_BOX_METHODS[positive_box_method](**positive_box_method_args)
+        self._positive_outputs = _POSITIVE_BOX_METHODS[positive_box_method](
+            **positive_box_method_args
+        )
 
     @ModifierProp()
     def gain(self) -> float:
@@ -134,12 +139,21 @@ class RankMimickingModifier(BaseDistillationModifier):
     def scale_with_batch_size(self, value: bool):
         self._scale_with_batch_size = value
 
-    def compute_distillation_loss(self, student_outputs, teacher_outputs, student_labels, **kwargs):
-        distillation_loss = 0.
+    def compute_distillation_loss(
+        self, student_outputs, teacher_outputs, student_labels, **kwargs
+    ):
+        distillation_loss = 0.0
         for target in student_labels:
-            positive_student_outputs, positive_teacher_outputs = self._positive_outputs(student_outputs, teacher_outputs, target)
-            if positive_student_outputs is not None and positive_teacher_outputs is not None:
-                distillation_loss += self._kldiv_output_loss(positive_student_outputs, positive_teacher_outputs)
+            positive_student_outputs, positive_teacher_outputs = self._positive_outputs(
+                student_outputs, teacher_outputs, target
+            )
+            if (
+                positive_student_outputs is not None
+                and positive_teacher_outputs is not None
+            ):
+                distillation_loss += self._kldiv_output_loss(
+                    positive_student_outputs, positive_teacher_outputs
+                )
 
         if self.scale_with_batch_size:
             batch_size = student_outputs[0].shape[0]

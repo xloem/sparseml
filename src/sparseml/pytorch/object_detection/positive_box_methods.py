@@ -1,11 +1,28 @@
-import copy
+# Copyright (c) 2021 - present / Neuralmagic, Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from typing import List
+
 import torch
+
 from sparseml.pytorch.utils.yolo_helpers import compute_iou
+
 
 __all__ = [
     "MatchAnchorIOU",
 ]
+
 
 class MatchAnchorIOU(object):
     def __init__(
@@ -28,7 +45,7 @@ class MatchAnchorIOU(object):
         self.output_format = output_format
         self.threshold = threshold
         self.number_of_layers = len(self.anchors)
-        assert(len(self.layer_resolution) == 2 * self.number_of_layers)
+        assert len(self.layer_resolution) == 2 * self.number_of_layers
 
     @property
     def anchors(self) -> List[List[int]]:
@@ -36,9 +53,9 @@ class MatchAnchorIOU(object):
 
     @anchors.setter
     def anchors(self, value: List[List[int]]) -> List[List[int]]:
-        assert(len(value) > 0)
+        assert len(value) > 0
         for v in value:
-            assert(len(v) > 1)
+            assert len(v) > 1
         self._anchors = value
 
     @property
@@ -47,7 +64,7 @@ class MatchAnchorIOU(object):
 
     @layer_resolution.setter
     def layer_resolution(self, value: List[int]) -> List[int]:
-        assert(len(value) > 1)
+        assert len(value) > 1
         self._layer_resolution = value
 
     @property
@@ -56,13 +73,14 @@ class MatchAnchorIOU(object):
 
     @target_format.setter
     def target_format(self, value: str):
-        assert(
+        assert (
             "i" in value
             and "c" in value
             and "y" in value
             and "x" in value
             and "h" in value
-            and "w" in value)
+            and "w" in value
+        )
 
         self._target_format = value
 
@@ -72,8 +90,8 @@ class MatchAnchorIOU(object):
 
     @anchor_format.setter
     def anchor_format(self, value: str):
-        assert(len(value) == 2)
-        assert("h" in value and "w" in value)
+        assert len(value) == 2
+        assert "h" in value and "w" in value
 
         self._anchor_format = value
 
@@ -83,16 +101,16 @@ class MatchAnchorIOU(object):
 
     @output_format.setter
     def output_format(self, value: str):
-        assert(len(value) == 5)
-        assert(
+        assert len(value) == 5
+        assert (
             "b" in value
             and "a" in value
             and "y" in value
             and "x" in value
-            and "o" in value)
+            and "o" in value
+        )
 
         self._output_format = value
-
 
     def __call__(self, student_outputs, teacher_outputs, target):
         device = target.device
@@ -192,8 +210,12 @@ class MatchAnchorIOU(object):
 
         x = x.view((1, -1, 1)).repeat((layer_height, 1, number_of_anchors))
         y = y.view((-1, 1, 1)).repeat((1, layer_width, number_of_anchors))
-        width = torch.tensor(width).view((1, 1, -1)).repeat((layer_height, layer_width, 1))
-        height = torch.tensor(height).view((1, 1, -1)).repeat((layer_height, layer_width, 1))
+        width = (
+            torch.tensor(width).view((1, 1, -1)).repeat((layer_height, layer_width, 1))
+        )
+        height = (
+            torch.tensor(height).view((1, 1, -1)).repeat((layer_height, layer_width, 1))
+        )
 
         return [y, x, height, width]
 
@@ -219,7 +241,9 @@ class MatchAnchorIOU(object):
 
     def _get_class_scores(self, output):
         output_dimension = self.output_format.index("o")
-        _, class_scores = torch.split(output, (5, self.number_of_classes), output_dimension)
+        _, class_scores = torch.split(
+            output, (5, self.number_of_classes), output_dimension
+        )
         return class_scores.softmax(output_dimension)
 
     def _get_image_output(self, output, image_index):
@@ -238,6 +262,15 @@ class MatchAnchorIOU(object):
         output_dimension = self.output_format.index("o")
 
         # Permute dimensions such that it has format 'yxa'
-        scores = torch.permute(scores, (y_dimension, x_dimension, anchor_dimension, batch_dimension, output_dimension))
+        scores = torch.permute(
+            scores,
+            (
+                y_dimension,
+                x_dimension,
+                anchor_dimension,
+                batch_dimension,
+                output_dimension,
+            ),
+        )
         scores = torch.squeeze(scores, 4)
         return torch.squeeze(scores, 3)
