@@ -138,6 +138,7 @@ class MatchAnchorIOU(object):
             iou_scores = compute_iou(layer_anchor_boxes, target_box)
 
             is_anchor_match = iou_scores >= self.threshold
+
             found_match = found_match or torch.any(is_anchor_match)
 
             if torch.any(is_anchor_match):
@@ -168,11 +169,11 @@ class MatchAnchorIOU(object):
 
     def _get_target_x(self, target):
         index = self.target_format.index("x")
-        return target[index].to(int)
+        return target[index] * self._get_image_width()
 
     def _get_target_y(self, target):
         index = self.target_format.index("y")
-        return target[index].to(int)
+        return target[index] * self._get_image_height()
 
     def _get_target_width(self, target):
         index = self.target_format.index("w")
