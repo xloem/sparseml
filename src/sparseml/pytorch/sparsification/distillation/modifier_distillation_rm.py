@@ -16,7 +16,7 @@
 Modifier for performing model distillation
 """
 
-
+import torch
 import logging
 from typing import Any, List
 
@@ -85,7 +85,6 @@ class RankMimickingModifier(BaseDistillationModifier):
         temperature: float = 2.0,
         positive_box_method: str = "match_anchor_iou",
         positive_box_method_args: Any = None,
-        scale_with_batch_size: bool = True,
     ):
         super().__init__(
             start_epoch=start_epoch,
@@ -96,7 +95,6 @@ class RankMimickingModifier(BaseDistillationModifier):
         )
         self.gain = gain
         self.temperature = temperature
-        self.scale_with_batch_size = scale_with_batch_size
         self._positive_outputs = _POSITIVE_BOX_METHODS[positive_box_method](
             **positive_box_method_args
         )
@@ -131,33 +129,20 @@ class RankMimickingModifier(BaseDistillationModifier):
         """
         self._temperature = value
 
-    @ModifierProp()
-    def scale_with_batch_size(self) -> bool:
-        return self._scale_with_batch_size
-
-    @scale_with_batch_size.setter
-    def scale_with_batch_size(self, value: bool):
-        self._scale_with_batch_size = value
-
     def compute_distillation_loss(
         self, student_outputs, teacher_outputs, student_labels, **kwargs
     ):
         distillation_loss = 0.0
-        for target in student_labels:
-            positive_student_outputs, positive_teacher_outputs = self._positive_outputs(
-                student_outputs, teacher_outputs, target
+        positive_student_outputs, positive_teacher_outputs = self._positive_outputs(
+            student_outputs, teacher_outputs, student_labels
+        )
+        if (
+            positive_student_outputs is not None
+            and positive_teacher_outputs is not None
+        ):
+            distillation_loss += self._kldiv_output_loss(
+                positive_student_outputs, positive_teacher_outputs
             )
-            if (
-                positive_student_outputs is not None
-                and positive_teacher_outputs is not None
-            ):
-                distillation_loss += self._kldiv_output_loss(
-                    positive_student_outputs, positive_teacher_outputs
-                )
-
-        if self.scale_with_batch_size:
-            batch_size = student_outputs[0].shape[0]
-            distillation_loss *= batch_size
 
         return distillation_loss
 
