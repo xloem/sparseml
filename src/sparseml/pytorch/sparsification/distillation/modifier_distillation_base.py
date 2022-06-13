@@ -348,8 +348,8 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
                 log_target=True,
                 reduction="sum",
             )
-            * (self._temperature ** 2)
-            / (student_val.numel() / student_val.shape[-1])
+            #* (self._temperature ** 2)
+            #/ (student_val.numel() / student_val.shape[-1])
         )
         return v
 

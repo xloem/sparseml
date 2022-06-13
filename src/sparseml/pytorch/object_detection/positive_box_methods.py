@@ -34,7 +34,7 @@ class MatchAnchorIOU(object):
         target_format: str = "icyxhw",
         anchor_format: str = "hw",
         output_format: str = "bayxo",
-        threshold: float = 0.25,
+        threshold: float = 0.5,
     ):
         self.anchors = anchors
         self.layer_resolution = layer_resolution
@@ -112,76 +112,69 @@ class MatchAnchorIOU(object):
 
         self._output_format = value
 
-    def __call__(self, student_outputs, teacher_outputs, target):
-        device = target.device
-        target_image = self._get_target_image_index(target)
-        target_class = self._get_target_class(target)
-        target_box = self._get_target_box(target)
+    def __call__(self, student_outputs, teacher_outputs, targets):
+        device = targets.device
+        target_images = self._get_target_images(targets)
+        target_classes = self._get_target_classes(targets)
+        target_boxes = self._get_target_box(targets)
 
         positive_student_outputs = []
         positive_teacher_outputs = []
+        for _ in range(target_images.numel()):
+            positive_student_outputs.append([])
+            positive_teacher_outputs.append([])
 
         found_match = False
         for layer in range(self.number_of_layers):
+            with torch.no_grad():
+                layer_anchor_boxes = self._get_anchor_box(layer)
+                layer_anchor_boxes = [b.to(device) for b in layer_anchor_boxes]
+                iou_scores = compute_iou(layer_anchor_boxes, target_boxes)
+
+                is_anchor_match = iou_scores >= self.threshold
+
+                found_match = found_match or torch.any(is_anchor_match)
+
             student_scores = self._get_class_scores(student_outputs[layer])
-            student_scores = self._filter_class(student_scores, target_class)
-            student_scores = self._get_image_output(student_scores, target_image)
             student_scores = self._align_dimensions_to_anchor_boxes(student_scores)
 
             teacher_scores = self._get_class_scores(teacher_outputs[layer])
-            teacher_scores = self._filter_class(teacher_scores, target_class)
-            teacher_scores = self._get_image_output(teacher_scores, target_image)
             teacher_scores = self._align_dimensions_to_anchor_boxes(teacher_scores)
 
-            layer_anchor_boxes = self._get_anchor_box(layer)
-            layer_anchor_boxes = [b.to(device) for b in layer_anchor_boxes]
-            iou_scores = compute_iou(layer_anchor_boxes, target_box)
-
-            is_anchor_match = iou_scores >= self.threshold
-
-            found_match = found_match or torch.any(is_anchor_match)
-
-            if torch.any(is_anchor_match):
-                positive_student_outputs.append(student_scores[is_anchor_match])
-                positive_teacher_outputs.append(teacher_scores[is_anchor_match])
+            for target_index, (target_image, target_class, target_anchor_match) in enumerate(zip(target_images, target_classes, is_anchor_match)):
+                if torch.any(target_anchor_match):
+                    positive_student_outputs[target_index].append(student_scores[target_image][target_class][target_anchor_match])
+                    positive_teacher_outputs[target_index].append(teacher_scores[target_image][target_class][target_anchor_match])
 
         if found_match:
-            positive_student_outputs = torch.cat(positive_student_outputs)
-            positive_teacher_outputs = torch.cat(positive_teacher_outputs)
+            positive_student_outputs = [torch.cat(out) for out in positive_student_outputs if out]
+            positive_teacher_outputs = [torch.cat(out) for out in positive_teacher_outputs if out]
             return positive_student_outputs, positive_teacher_outputs
         else:
             return None, None
 
-    def _get_target_box(self, target):
-        x = self._get_target_x(target)
-        y = self._get_target_y(target)
-        width = self._get_target_width(target)
-        height = self._get_target_height(target)
-        return [y, x, height, width]
+    def _get_target_box(self, targets):
+        y_index = self.target_format.index("y")
+        x_index = self.target_format.index("x")
+        height_index = self.target_format.index("h")
+        width_index = self.target_format.index("w")
 
-    def _get_target_image_index(self, target):
+        indices = torch.tensor([y_index, x_index, height_index, width_index], dtype=torch.int32, device=targets.device)
+        target_boxes = torch.index_select(targets, -1, indices)  # number of objects, 4
+        image_height = self._get_image_height()
+        image_width = self._get_image_width()
+        scale = torch.tensor([image_height, image_width, image_height, image_width], dtype=torch.float32, device=targets.device).view(1, -1)
+        target_boxes *= scale
+        target_boxes = target_boxes.view((target_boxes.shape[0], 1, 1, -1)) # number of objects, number of vertical cells, number of horizontal cells, number of anchors, 4
+        return torch.split(target_boxes, 1, dim=-1)
+
+    def _get_target_images(self, targets):
         index = self.target_format.index("i")
-        return target[index].to(int)
+        return torch.select(targets, -1, torch.tensor(index, dtype=torch.int32, device=targets.device)).to(int)
 
-    def _get_target_class(self, target):
+    def _get_target_classes(self, targets):
         index = self.target_format.index("c")
-        return target[index].to(int)
-
-    def _get_target_x(self, target):
-        index = self.target_format.index("x")
-        return target[index] * self._get_image_width()
-
-    def _get_target_y(self, target):
-        index = self.target_format.index("y")
-        return target[index] * self._get_image_height()
-
-    def _get_target_width(self, target):
-        index = self.target_format.index("w")
-        return target[index] * self._get_image_width()
-
-    def _get_target_height(self, target):
-        index = self.target_format.index("h")
-        return target[index] * self._get_image_height()
+        return torch.select(targets, -1, torch.tensor(index, dtype=torch.int32, device=targets.device)).to(int)
 
     def _get_image_width(self):
         index = self.anchor_format.index("w")
@@ -199,24 +192,18 @@ class MatchAnchorIOU(object):
         image_height = self._get_image_height()
 
         x = torch.arange(0, layer_width, dtype=torch.float32)
-        x = (x + 0.5) * image_width / layer_width
+        x = (x + 0.5) * image_width / layer_width # number of horizontal cells
 
         y = torch.arange(0, layer_height, dtype=torch.float32)
-        y = (y + 0.5) * image_height / layer_height
+        y = (y + 0.5) * image_height / layer_height # number of vertical cells
 
-        width = self._get_anchor_width(layer)
-        height = self._get_anchor_height(layer)
+        width = self._get_anchor_width(layer)   # number of anchors
+        height = self._get_anchor_height(layer) # number of anchors
 
-        number_of_anchors = len(width)
-
-        x = x.view((1, -1, 1)).repeat((layer_height, 1, number_of_anchors))
-        y = y.view((-1, 1, 1)).repeat((1, layer_width, number_of_anchors))
-        width = (
-            torch.tensor(width).view((1, 1, -1)).repeat((layer_height, layer_width, 1))
-        )
-        height = (
-            torch.tensor(height).view((1, 1, -1)).repeat((layer_height, layer_width, 1))
-        )
+        x = x.view((1, 1, -1, 1))                         # number of objects, number of vertical cells, number of horizontal cells, number of anchors
+        y = y.view((1, -1, 1, 1))                         # number of objects, number of vertical cells, number of horizontal cells, number of anchors
+        width = torch.tensor(width).view((1, 1, 1, -1))   # number of objects, number of vertical cells, number of horizontal cells, number of anchors
+        height = torch.tensor(height).view((1, 1, 1, -1)) # number of objects, number of vertical cells, number of horizontal cells, number of anchors
 
         return [y, x, height, width]
 
@@ -247,14 +234,6 @@ class MatchAnchorIOU(object):
         )
         return class_scores.softmax(output_dimension)
 
-    def _get_image_output(self, output, image_index):
-        batch_dimension = self.output_format.index("b")
-        return torch.index_select(output, batch_dimension, image_index)
-
-    def _filter_class(self, class_scores, class_index):
-        output_dimension = self.output_format.index("o")
-        return torch.index_select(class_scores, output_dimension, class_index)
-
     def _align_dimensions_to_anchor_boxes(self, scores):
         batch_dimension = self.output_format.index("b")
         anchor_dimension = self.output_format.index("a")
@@ -262,16 +241,15 @@ class MatchAnchorIOU(object):
         x_dimension = self.output_format.index("x")
         output_dimension = self.output_format.index("o")
 
-        # Permute dimensions such that it has format 'yxa'
+        # Permute dimensions such that it has format 'boyxa'
         scores = torch.permute(
             scores,
             (
+                batch_dimension,
+                output_dimension,
                 y_dimension,
                 x_dimension,
                 anchor_dimension,
-                batch_dimension,
-                output_dimension,
             ),
         )
-        scores = torch.squeeze(scores, 4)
-        return torch.squeeze(scores, 3)
+        return scores
