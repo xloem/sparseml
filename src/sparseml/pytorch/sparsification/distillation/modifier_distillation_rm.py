@@ -16,7 +16,6 @@
 Modifier for performing model distillation
 """
 
-import torch
 import logging
 from typing import Any, List
 
