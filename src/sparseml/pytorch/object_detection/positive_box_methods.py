@@ -36,7 +36,7 @@ class MatchAnchorIOU(object):
         output_format: str = "bayxo",
         threshold: float = 0.5,
         max_boxes: Union[int, None] = 100,
-        objectness_multiply = False,
+        objectness_multiply: bool = False,
     ):
         self.anchors = anchors
         self.layer_resolution = layer_resolution
@@ -141,7 +141,7 @@ class MatchAnchorIOU(object):
                 number_objects = mask.size(0)
                 mask = mask.view(number_objects, -1)
                 if self.max_boxes is not None and mask.size(1) > self.max_boxes:
-                    iou_scores = iou_scores.view(number_objects, -1)
+                    iou_scores = torch.reshape(iou_scores, (number_objects, -1))
                     number_boxes = iou_scores.size(1)
                     _, sorting_indices = torch.sort(iou_scores, descending=True)
                     sorting_indices = sorting_indices[:, :self.max_boxes]
@@ -149,7 +149,7 @@ class MatchAnchorIOU(object):
                     sorting_indices = torch.flatten(sorting_indices)
                     mask = torch.flatten(mask)
                     mask = mask[sorting_indices]
-                    mask = mask.view(number_objects, -1)
+                    mask = torch.reshape(mask, (number_objects, -1))
                 else:
                     sorting_indices = None
 
@@ -173,14 +173,14 @@ class MatchAnchorIOU(object):
         scores = self._get_class_scores(scores)
         batch_size = scores.size(0)
         number_classes = scores.size(1)
-        scores = scores.view(batch_size * number_classes, -1)
+        scores = torch.reshape(scores, (batch_size * number_classes, -1))
         indices = images * number_classes + classes
         scores = scores[indices]
         number_objects = scores.size(0)
         if sorting_indices is not None:
             scores = torch.flatten(scores)
             scores = scores[sorting_indices]
-        scores = scores.view(number_objects, -1)
+        scores = torch.reshape(scores, (number_objects, -1))
         scores -= mask
 
         return scores
@@ -261,9 +261,10 @@ class MatchAnchorIOU(object):
 
     def _get_class_scores(self, output):
         _, objectness, class_scores = torch.split(output, (4, 1, self.number_of_classes), 1)
+        class_scores = torch.sigmoid(class_scores)
         if self.objectness_multiply:
-            class_scores = objectness * class_scores
-        return class_scores.softmax(1)
+            class_scores = torch.sigmoid(objectness) * class_scores
+        return class_scores
 
     def _align_dimensions_to_anchor_boxes(self, scores):
         batch_dimension = self.output_format.index("b")
