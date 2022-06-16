@@ -143,7 +143,7 @@ class MatchAnchorIOU(object):
                 if self.max_boxes is not None and mask.size(1) > self.max_boxes:
                     iou_scores = iou_scores.view(number_objects, -1)
                     number_boxes = iou_scores.size(1)
-                    _, sorting_indices = list(torch.sort(iou_scores, descending=True))
+                    _, sorting_indices = torch.sort(iou_scores, descending=True)
                     sorting_indices = sorting_indices[:, :self.max_boxes]
                     sorting_indices += torch.arange(number_objects, device=device, dtype=torch.int32).view(-1, 1) * number_boxes
                     sorting_indices = torch.flatten(sorting_indices)
@@ -152,7 +152,6 @@ class MatchAnchorIOU(object):
                     mask = mask.view(number_objects, -1)
                 else:
                     sorting_indices = None
-
 
                 student_scores = self._get_select_scores(student_outputs[layer], target_images, target_classes, mask, sorting_indices)
 
@@ -178,11 +177,10 @@ class MatchAnchorIOU(object):
         indices = images * number_classes + classes
         scores = scores[indices]
         number_objects = scores.size(0)
-        scores = scores.view(number_objects, -1)
         if sorting_indices is not None:
             scores = torch.flatten(scores)
             scores = scores[sorting_indices]
-            scores = scores.view(number_objects, -1)
+        scores = scores.view(number_objects, -1)
         scores -= mask
 
         return scores
