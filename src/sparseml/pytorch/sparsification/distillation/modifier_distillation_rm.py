@@ -81,7 +81,7 @@ class RankMimickingModifier(BaseDistillationModifier):
         teacher_input_keys: List[Any] = None,
         update_frequency: float = -1.0,
         gain: float = 4.0,
-        temperature: float = 2.0,
+        temperature: float = 1.0,
         positive_box_method: str = "match_anchor_iou",
         positive_box_method_args: Any = None,
     ):
