@@ -994,10 +994,6 @@ def _convert_quantizable_matmul_and_add(model: ModelProto):
     |                     |
     |                    Add (with constant bias)
     |                     |
-    |               QuantizeLinear (Optional)
-    |                     |
-    |              DequantizeLinear (Optional)
-    |                     |
     |                  OUTPUT
     | We end up converting to:
     |       INPUT
@@ -1046,26 +1042,6 @@ def _convert_quantizable_matmul_and_add(model: ModelProto):
         if not bias_add_node or bias_add_node.op_type != "Add":
             continue
 
-        # Optionally find output QDQ block which will be deleted
-        output_quantize_node = graph.get_node_single_child(bias_add_node)
-        if (
-            not output_quantize_node
-            or output_quantize_node.op_type not in _QUANTIZE_OP_NAMES
-        ):
-            output_quantize_node = None
-
-        output_dequantize_node = (
-            graph.get_node_single_child(output_quantize_node)
-            if output_quantize_node
-            else None
-        )
-        if (
-            not output_dequantize_node
-            or output_dequantize_node.op_type not in _QUANTIZE_OP_NAMES
-        ):
-            output_quantize_node = None
-            output_dequantize_node = None
-
         input_quantize_params = get_quantization_params(
             model, input_quantize_node, include_target=False
         )
@@ -1076,8 +1052,6 @@ def _convert_quantizable_matmul_and_add(model: ModelProto):
             # weight initializer not included
             continue
         if input_quantize_node.op_type != "DequantizeLinear":
-            continue
-        if output_quantize_node and output_quantize_node.op_type != "QuantizeLinear":
             continue
         bias_initializer = get_init_by_name(model, bias_add_node.input[1]) or (
             get_init_by_name(model, bias_add_node.input[0])
@@ -1097,14 +1071,10 @@ def _convert_quantizable_matmul_and_add(model: ModelProto):
             weight_quantize_params=weight_quantize_params,
             bias_initializer=bias_initializer,
             bias_add_name=bias_add_node.name,
-            target_output=(
-                output_dequantize_node.output[0]
-                if output_dequantize_node
-                else bias_add_node.output[0]
-            ),
+            target_output=(bias_add_node.output[0]),
             transpose_weight=True,
-            output_quantize_node=output_quantize_node,
-            output_dequantize_node=output_dequantize_node,
+            output_quantize_node=None,
+            output_dequantize_node=None,
         )
 
         # Cleanup
@@ -1117,10 +1087,6 @@ def _convert_quantizable_matmul_and_add(model: ModelProto):
         current_graph = ONNXGraph(model)
         if len(current_graph.get_node_children(input_quantize_node)) == 1:
             delete_quant_node(model, input_quantize_node, keep_params=True)
-        if output_quantize_node:
-            delete_quant_node(model, output_quantize_node, keep_params=True)
-        if output_dequantize_node:
-            delete_quant_node(model, output_dequantize_node, keep_params=True)
 
         # delete original Gemm node
         remove_node_and_params_from_graph(model, matmul_node, keep_params=None)
