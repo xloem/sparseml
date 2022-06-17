@@ -23,6 +23,7 @@ from sparseml.optim import ModifierProp
 from sparseml.pytorch.object_detection import MatchAnchorIOU
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
     BaseDistillationModifier,
+    kl_logsoftmax,
 )
 from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
 
@@ -139,8 +140,8 @@ class RankMimickingModifier(BaseDistillationModifier):
             positive_student_outputs is not None
             and positive_teacher_outputs is not None
         ):
-            distillation_loss += self._kldiv_output_loss(
-                positive_student_outputs, positive_teacher_outputs
+            distillation_loss += kl_logsoftmax(
+                positive_student_outputs, positive_teacher_outputs, self.temperature
             )
 
         return distillation_loss
