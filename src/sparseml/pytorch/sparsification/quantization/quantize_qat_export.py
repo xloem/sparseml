@@ -1071,7 +1071,7 @@ def _convert_quantizable_matmul_and_add(model: ModelProto):
             weight_quantize_params=weight_quantize_params,
             bias_initializer=bias_initializer,
             bias_add_name=bias_add_node.name,
-            target_output=(bias_add_node.output[0]),
+            target_output=bias_add_node.output[0],
             transpose_weight=True,
             output_quantize_node=None,
             output_dequantize_node=None,
