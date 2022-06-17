@@ -23,6 +23,7 @@ from typing import Any, List
 from sparseml.optim import ModifierProp
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
     BaseDistillationModifier,
+    kldiv_loss,
 )
 from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
 
@@ -43,14 +44,12 @@ class DistillationModifier(BaseDistillationModifier):
     loss_update(loss) must be called before any backwards pass in the integrated
     training flow. If no teacher model is provided, then self distillation
     will be used
-
     | Sample yaml:
     |   !DistillationModifier
     |       start_epoch: 0.0
     |       hardness: 0.5
     |       temperature: 2.0
     |       distill_output_keys: [0]
-
     :param start_epoch: The epoch to start the modifier at
     :param end_epoch: The epoch to end the modifier at
     :param distill_output_keys: list of keys for the module outputs to use for
@@ -119,7 +118,7 @@ class DistillationModifier(BaseDistillationModifier):
         self._temperature = value
 
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
-        return self._kldiv_output_loss(student_outputs, teacher_outputs)
+        return kldiv_loss(student_outputs, teacher_outputs, self.temperature, self._distill_output_keys)
 
     def compute_total_loss(self, loss, distillation_loss):
         return ((1.0 - self.hardness) * loss) + (self.hardness * distillation_loss)
