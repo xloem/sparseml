@@ -51,6 +51,8 @@ class MatchAnchorIOU(object):
         self.number_of_layers = len(self.anchors)
         assert len(self.layer_resolution) == 2 * self.number_of_layers
 
+        layer_anchor_boxes = [self._construct_anchor_box(layer) for layer in range(self.number_of_layers)]
+
     @property
     def anchors(self) -> List[List[int]]:
         return self._anchors
@@ -128,7 +130,6 @@ class MatchAnchorIOU(object):
         found_match = False
         for layer in range(self.number_of_layers):
             with torch.no_grad():
-                layer_anchor_boxes = self._get_anchor_box(layer)
                 layer_anchor_boxes = [b.to(device) for b in layer_anchor_boxes]
                 iou_scores = compute_iou(layer_anchor_boxes, target_boxes)
 
