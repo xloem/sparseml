@@ -1537,7 +1537,7 @@ def quantize_torch_qat_export(
     quantize_resnet_identity_add_inputs(model)
     quantized_residual_add_optim(model)
     _remove_duplicate_quantize_ops(model)
-    _cleanup_unused_quants(model)
+    #_cleanup_unused_quants(model)
 
     graph = ONNXGraph(model)
     graph.sort_nodes_topologically()
