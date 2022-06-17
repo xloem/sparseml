@@ -51,7 +51,8 @@ class MatchAnchorIOU(object):
         self.number_of_layers = len(self.anchors)
         assert len(self.layer_resolution) == 2 * self.number_of_layers
 
-        layer_anchor_boxes = [self._construct_anchor_box(layer) for layer in range(self.number_of_layers)]
+        self.is_first_epoch = True
+        self.anchor_boxes = [self._construct_anchor_box(layer) for layer in range(self.number_of_layers)]
 
     @property
     def anchors(self) -> List[List[int]]:
@@ -120,6 +121,10 @@ class MatchAnchorIOU(object):
 
     def __call__(self, student_outputs, teacher_outputs, targets):
         device = targets.device
+        if self.is_first_epoch:
+            self.anchor_boxes = [b.to(device) for b in self.anchor_boxes]
+            self.is_first_epoch = False
+
         target_images = self._get_target_images(targets)
         target_classes = self._get_target_classes(targets)
         target_boxes = self._get_target_box(targets)
@@ -130,7 +135,7 @@ class MatchAnchorIOU(object):
         found_match = False
         for layer in range(self.number_of_layers):
             with torch.no_grad():
-                layer_anchor_boxes = [b.to(device) for b in layer_anchor_boxes]
+                layer_anchor_boxes = self.anchor_boxes[layer]
                 iou_scores = compute_iou(layer_anchor_boxes, target_boxes)
 
                 is_anchor_match = iou_scores >= self.threshold
@@ -217,7 +222,7 @@ class MatchAnchorIOU(object):
         index = self.anchor_format.index("h")
         return self.image_resolution[index]
 
-    def _get_anchor_box(self, layer):
+    def _construct_anchor_box(self, layer):
         layer_width = self._get_layer_width(layer)
         layer_height = self._get_layer_height(layer)
 
