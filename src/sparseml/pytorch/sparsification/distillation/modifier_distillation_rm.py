@@ -20,7 +20,7 @@ import logging
 from typing import Any, List
 
 from sparseml.optim import ModifierProp
-from sparseml.pytorch.object_detection import MatchAnchorIOU
+from sparseml.pytorch.utils.positive_box_methods import MatchAnchorIOU
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
     BaseDistillationModifier,
     kl_logsoftmax,
