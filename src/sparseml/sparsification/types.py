@@ -36,5 +36,6 @@ class SparsificationTypes(Enum):
     pruning = "pruning"
     quantization = "quantization"
     distillation = "distillation"
+    feature_distillation = "feature_distillation"
     regularization = "regularization"
     structured = "structured"
