@@ -1548,6 +1548,7 @@ def quantize_torch_qat_export(
         operations. All quantized Convs and FC inputs and outputs be surrounded by
         fake quantize ops
     """
+    use_qlinearconv = True
     if isinstance(model, str):
         model = onnx.load(model)
 
