@@ -20,12 +20,12 @@ import torch
 import logging
 from typing import Any, List
 
-from sparseml.optim import ModifierProp
+from sparseml.optim import BaseModifier, ModifierProp
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
     BaseDistillationModifier,
-    kldiv_loss,
 )
 from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
+from sparseml.sparsification import SparsificationTypes
 
 
 __all__ = [
@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 @PyTorchModifierYAML()
-class DistillationModifier(BaseDistillationModifier):
+class FeatureImitationModifier(BaseDistillationModifier):
     """
     Adds a knowledge distillation loss based on a teacher model during the
     loss_update phase of the SparseML lifecycle. A distillation_teacher
@@ -60,11 +60,9 @@ class DistillationModifier(BaseDistillationModifier):
     :param teacher_input_keys: list of keys to filter the inputs by before
         passing into the teacher. None or empty list defaults to using
         all available inputs
-    :param hardness: how much to weight the distillation loss vs the base loss
+    :param gain: how much to weight the distillation loss vs the base loss
         (e.g. hardness of 0.6 will return 0.6 * distill_loss + 0.4 * base_loss).
         Default is 0.5
-    :param temperature: temperature applied to teacher and student softmax for
-        distillation
     """
 
     def __init__(
@@ -88,6 +86,19 @@ class DistillationModifier(BaseDistillationModifier):
         )
         self.number_of_classes = number_of_classes
         self.gain = gain
+        self.output_format = output_format
+        self.feature_format = feature_format
+        self.output_class_dimension = output_format.index("o")
+        self.output_anchor_dimension = output_format.index("a")
+        self.feature_dimension = feature_format.index("o")
+
+    @BaseModifier.sparsification_types.getter
+    def sparsification_types(self) -> List[SparsificationTypes]:
+        """
+        :return: the sparsification types this modifier instance will apply
+        """
+        return [SparsificationTypes.feature_distillation]
+
 
     @ModifierProp()
     def number_of_classes(self) -> int:
@@ -127,14 +138,27 @@ class DistillationModifier(BaseDistillationModifier):
         for layer in range(number_layers):
             student_class_scores = self._get_scores(student_outputs["prediction"][layer])
             teacher_class_scores = self._get_scores(teacher_outputs["prediction"][layer])
-            projection_weight = torch.mean((student_class_scores - teacher_class_scores)**2, dim=(self.output_anchor_dimension, self.output_class_dimension))
-            feature_difference = torch.mean((student_outputs["feature"] - teacher_outputs["feature"])**2, dim=self.feature_dimension)
+            projection_weight = torch.mean(
+                (student_class_scores - teacher_class_scores)**2,
+                dim=(self.output_anchor_dimension, self.output_class_dimension)
+            )
+            feature_difference = torch.mean(
+                (student_outputs["feature"] - teacher_outputs["feature"])**2,
+                dim=self.feature_dimension
+            )
 
-            fi_loss = torch.mean(projection_weight * feature_difference, dim=(self.feature_y_dimension, self.feature_x_dimension))
+            fi_loss = torch.mean(
+                projection_weight * feature_difference,
+                dim=(self.feature_y_dimension, self.feature_x_dimension)
+            )
             distillation_loss += fi_loss
 
         return fi_loss
 
     def compute_total_loss(self, loss, distillation_loss):
         return loss + self.gain * distillation_loss
+
+    def _get_scores(self, outputs):
+        _, scores = torch.split((4, self.number_of_classes), dim=self.output_class_dimension)
+        return scores
 
