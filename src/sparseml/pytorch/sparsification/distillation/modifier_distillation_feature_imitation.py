@@ -18,7 +18,7 @@ Modifier for performing model distillation
 
 import torch
 import logging
-from typing import Any, List
+from typing import Any, List, Union
 
 from sparseml.optim import BaseModifier, ModifierProp
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
@@ -97,7 +97,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
         """
         :return: the sparsification types this modifier instance will apply
         """
-        return [SparsificationTypes.feature_distillation]
+        return [SparsificationTypes.feature_distillation, SparsificationTypes.distillation]
 
 
     @ModifierProp()
@@ -133,11 +133,11 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self._gain = value
 
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
-        number_layers = len(student_outputs["prediction"])
+        number_layers = len(student_outputs["output"])
         distillation_loss = 0.0
         for layer in range(number_layers):
-            student_class_scores = self._get_scores(student_outputs["prediction"][layer])
-            teacher_class_scores = self._get_scores(teacher_outputs["prediction"][layer])
+            student_class_scores = self._get_scores(student_outputs["output"][layer])
+            teacher_class_scores = self._get_scores(teacher_outputs["output"][layer])
             projection_weight = torch.mean(
                 (student_class_scores - teacher_class_scores)**2,
                 dim=(self.output_anchor_dimension, self.output_class_dimension)
