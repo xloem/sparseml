@@ -159,6 +159,6 @@ class FeatureImitationModifier(BaseDistillationModifier):
         return loss + self.gain * distillation_loss
 
     def _get_scores(self, outputs):
-        _, scores = torch.split((4, self.number_of_classes), dim=self.output_class_dimension)
+        _, scores = torch.split(outputs, (4, self.number_of_classes), dim=self.output_class_dimension)
         return scores
 
