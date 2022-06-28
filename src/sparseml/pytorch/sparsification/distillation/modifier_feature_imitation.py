@@ -52,6 +52,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
     |       temperature: 2.0
     |       distill_output_keys: [0]
 
+    :param number_of_classes:
     :param start_epoch: The epoch to start the modifier at
     :param end_epoch: The epoch to end the modifier at
     :param distill_output_keys: list of keys for the module outputs to use for
@@ -60,21 +61,24 @@ class FeatureImitationModifier(BaseDistillationModifier):
     :param teacher_input_keys: list of keys to filter the inputs by before
         passing into the teacher. None or empty list defaults to using
         all available inputs
-    :param gain: how much to weight the distillation loss vs the base loss
-        (e.g. hardness of 0.6 will return 0.6 * distill_loss + 0.4 * base_loss).
-        Default is 0.5
+    :param update_frequency:
+    :param gain: how much to weight the distillation loss. Default is 1.5
+    :param output_format:
+    :param feature_format:
     """
 
     def __init__(
         self,
         number_of_classes: int,
+        student_features: List[int],
+        teacher_features: List[int],
         start_epoch: float = -1.0,
         end_epoch: float = -1.0,
         distill_output_keys: List[Any] = None,
         teacher_input_keys: List[Any] = None,
         update_frequency: float = -1.0,
         gain: float = 1.5,
-        output_format: str = "boayx",
+        output_format: str = "bayxo",
         feature_format: str = "boyx",
     ):
         super().__init__(
@@ -85,12 +89,17 @@ class FeatureImitationModifier(BaseDistillationModifier):
             update_frequency=update_frequency,
         )
         self.number_of_classes = number_of_classes
+        self.student_features = student_features
+        self.teacher_features = teacher_features
         self.gain = gain
         self.output_format = output_format
         self.feature_format = feature_format
         self.output_class_dimension = output_format.index("o")
         self.output_anchor_dimension = output_format.index("a")
         self.feature_dimension = feature_format.index("o")
+        self.number_of_layers = len(self.student_features)
+
+        self._initialize_projection()
 
     @BaseModifier.sparsification_types.getter
     def sparsification_types(self) -> List[SparsificationTypes]:
@@ -98,7 +107,6 @@ class FeatureImitationModifier(BaseDistillationModifier):
         :return: the sparsification types this modifier instance will apply
         """
         return [SparsificationTypes.feature_distillation, SparsificationTypes.distillation]
-
 
     @ModifierProp()
     def number_of_classes(self) -> int:
@@ -117,6 +125,22 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self._number_of_classes = value
 
     @ModifierProp()
+    def student_features(self) -> List[int]:
+        return self._student_features
+
+    @student_features.setter
+    def student_features(self, value: List[int]):
+        self._student_features = value
+
+    @ModifierProp()
+    def teacher_features(self) -> List[int]:
+        return self._teacher_features
+
+    @teacher_features.setter
+    def teacher_features(self, value: List[int]):
+        self._teacher_features = value
+
+    @ModifierProp()
     def gain(self) -> float:
         """
         :return: how much to weight the distillation loss vs the base loss
@@ -132,33 +156,67 @@ class FeatureImitationModifier(BaseDistillationModifier):
         """
         self._gain = value
 
+    @ModifierProp()
+    def output_format(self) -> str:
+        return self._output_format
+
+    @output_format.setter
+    def output_format(self, value: str):
+        self._output_format = value
+
+    @ModifierProp()
+    def feature_format(self) -> str:
+        return self._feature_format
+
+    @feature_format.setter
+    def feature_format(self, value: str):
+        self._feature_format = value
+
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
-        number_layers = len(student_outputs["output"])
         distillation_loss = 0.0
-        for layer in range(number_layers):
+        for layer in range(self.number_of_layers):
             student_class_scores = self._get_scores(student_outputs["output"][layer])
             teacher_class_scores = self._get_scores(teacher_outputs["output"][layer])
             projection_weight = torch.mean(
                 (student_class_scores - teacher_class_scores)**2,
                 dim=(self.output_anchor_dimension, self.output_class_dimension)
             )
+            teacher_features = teacher_outputs["feature"][layer]
+            if self.projection[layer] is not None:
+                self.projection[layer] = self.projection[layer].to(teacher_features.device)
+                self.projection[layer] = self.projection[layer].to(teacher_features.dtype)
+                teacher_features = self.projection[layer](teacher_outputs["feature"][layer])
+
             feature_difference = torch.mean(
-                (student_outputs["feature"] - teacher_outputs["feature"])**2,
-                dim=self.feature_dimension
+                (student_outputs["feature"][layer] - teacher_features)**2,
+                dim=self.feature_dimension,
             )
 
-            fi_loss = torch.mean(
-                projection_weight * feature_difference,
-                dim=(self.feature_y_dimension, self.feature_x_dimension)
-            )
-            distillation_loss += fi_loss
+            fi_loss = torch.mean(projection_weight * feature_difference)
 
-        return fi_loss
+            distillation_loss += fi_loss / self.number_of_layers
+
+        return distillation_loss
 
     def compute_total_loss(self, loss, distillation_loss):
         return loss + self.gain * distillation_loss
 
+    def _initialize_projection(self):
+        self.projection = []
+        for layer in range(self.number_of_layers):
+            if self.student_features[layer] == self.teacher_features[layer]:
+                self.projection.append(None)
+            else:
+                self.projection.append(
+                    torch.nn.Conv2d(
+                        self.teacher_features[layer],
+                        self.student_features[layer],
+                        1,
+                        bias=False
+                    )
+                )
+
     def _get_scores(self, outputs):
-        _, scores = torch.split(outputs, (4, self.number_of_classes), dim=self.output_class_dimension)
+        _, scores = torch.split(outputs, (5, self.number_of_classes), dim=self.output_class_dimension)
         return scores
 
