@@ -13,12 +13,16 @@
 # limitations under the License.
 
 """
-Modifier for performing model distillation
+Modifier for performing knowledge distillation via feature immitation.
+Adapted from the paper "Knowledge Distillation for Object Detection
+via Rank Mimicking and Prediction-guided Feature Imitation"
+(https://arxiv.org/abs/2112.04840)
+
 """
 
 import torch
 import logging
-from typing import Any, List, Union
+from typing import Any, List
 
 from sparseml.optim import BaseModifier, ModifierProp
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
@@ -38,33 +42,39 @@ _LOGGER = logging.getLogger(__name__)
 @PyTorchModifierYAML()
 class FeatureImitationModifier(BaseDistillationModifier):
     """
-    Adds a knowledge distillation loss based on a teacher model during the
-    loss_update phase of the SparseML lifecycle. A distillation_teacher
-    module may be provided as a kwarg to the Manager initialization and
-    loss_update(loss) must be called before any backwards pass in the integrated
-    training flow. If no teacher model is provided, then self distillation
-    will be used
+    Adds a knowledge distillation loss based on the prediction-guided feature
+    imitation loss. A distillation_teacher module may be provided as a kwarg to
+    the Manager initialization and loss_update(loss) must be called before any
+    backwards pass in the integrated training flow. If no teacher model is
+    provided, then self distillation will be used.
 
     | Sample yaml:
-    |   !DistillationModifier
+    |   !FeatureImitationModifier
     |       start_epoch: 0.0
-    |       hardness: 0.5
-    |       temperature: 2.0
-    |       distill_output_keys: [0]
+    |       gain: 2.0
+    |       number_of_classes: 80
+    |       student_features: [64, 128, 256]
+    |       teacher_features: [128, 256, 512]
 
-    :param number_of_classes:
+    :param number_of_classes: Number of classes
+    :param student_features: List containing the number of features at each layer
+        of the student model
+    :param teacher_features: List containing the number of features at each layer
+        of the teacher model
     :param start_epoch: The epoch to start the modifier at
     :param end_epoch: The epoch to end the modifier at
-    :param distill_output_keys: list of keys for the module outputs to use for
+    :param distill_output_keys: List of keys for the module outputs to use for
         distillation if multiple outputs are present. None or empty list defaults
         to using all available outputs
-    :param teacher_input_keys: list of keys to filter the inputs by before
+    :param teacher_input_keys: List of keys to filter the inputs by before
         passing into the teacher. None or empty list defaults to using
         all available inputs
     :param update_frequency:
-    :param gain: how much to weight the distillation loss. Default is 1.5
-    :param output_format:
-    :param feature_format:
+    :param gain: How much to weight the distillation loss. Default is 1.5
+    :param output_format: Format for output tensors following this convention:
+        ("b"=batch size, "a"=anchors, "x"=horizontal tiles, "y"=vertical tiles, "o"=outputs)
+    :param feature_format: Format for feature tensors following this convention:
+        ("b"=batch size, "x"=horizontal tiles, "y"=vertical tiles, "o"=outputs)
     """
 
     def __init__(
@@ -185,7 +195,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
             if self.projection[layer] is not None:
                 self.projection[layer] = self.projection[layer].to(teacher_features.device)
                 self.projection[layer] = self.projection[layer].to(teacher_features.dtype)
-                teacher_features = self.projection[layer](teacher_outputs["feature"][layer])
+                teacher_features = self.projection[layer](teacher_features)
 
             feature_difference = torch.mean(
                 (student_outputs["feature"][layer] - teacher_features)**2,
