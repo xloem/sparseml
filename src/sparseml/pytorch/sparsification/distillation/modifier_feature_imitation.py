@@ -224,9 +224,10 @@ class FeatureImitationModifier(BaseDistillationModifier):
 
             fi_loss = torch.mean(projection_weight * feature_difference)
 
-            distillation_loss += fi_loss / self.number_of_layers
+            distillation_loss += fi_loss
 
-        return distillation_loss
+        batch_size = student_outputs["output"][layer].size(0)
+        return distillation_loss * batch_size / self.number_of_layers
 
     def compute_total_loss(self, loss, distillation_loss):
         return loss + self.gain * distillation_loss
@@ -249,5 +250,5 @@ class FeatureImitationModifier(BaseDistillationModifier):
 
     def _get_scores(self, outputs):
         _, scores = torch.split(outputs, (5, self.number_of_classes), dim=self.output_class_dimension)
-        return scores
+        return torch.sigmoid(scores)
 
