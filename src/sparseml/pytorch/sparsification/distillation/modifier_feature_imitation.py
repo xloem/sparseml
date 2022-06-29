@@ -94,11 +94,6 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self.gain = gain
         self.output_format = output_format
         self.feature_format = feature_format
-        self.output_class_dimension = output_format.index("o")
-        self.output_anchor_dimension = output_format.index("a")
-        self.feature_dimension = feature_format.index("o")
-        self.number_of_layers = len(self.student_features)
-
         self._initialize_projection()
 
     @BaseModifier.sparsification_types.getter
@@ -171,6 +166,22 @@ class FeatureImitationModifier(BaseDistillationModifier):
     @feature_format.setter
     def feature_format(self, value: str):
         self._feature_format = value
+
+    @ModifierProp(serializable=False)
+    def output_class_dimension(self) -> int:
+        return self.output_format.index("o")
+
+    @ModifierProp(serializable=False)
+    def output_anchor_dimension(self) -> int:
+        return self.output_format.index("a")
+
+    @ModifierProp(serializable=False)
+    def feature_dimension(self) -> int:
+        return self.feature_format.index("o")
+
+    @ModifierProp(serializable=False)
+    def number_of_layers(self) -> int:
+        return len(self.student_features)
 
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
         distillation_loss = 0.0
