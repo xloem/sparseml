@@ -212,13 +212,12 @@ class FeatureImitationModifier(BaseDistillationModifier):
                 dim=(self.output_anchor_dimension, self.output_class_dimension)
             )
             teacher_features = teacher_outputs["feature"][layer]
-            if self.projection[layer] is not None:
-                self.projection[layer] = self.projection[layer].to(teacher_features.device)
-                self.projection[layer] = self.projection[layer].to(teacher_features.dtype)
-                teacher_features = self.projection[layer](teacher_features)
+            self.projection[layer] = self.projection[layer].to(teacher_features.device)
+            self.projection[layer] = self.projection[layer].to(teacher_features.dtype)
+            teacher_projected_features = self.projection[layer](teacher_features)
 
             feature_difference = torch.mean(
-                (student_outputs["feature"][layer] - teacher_features)**2,
+                (student_outputs["feature"][layer] - teacher_projected_features)**2,
                 dim=self.feature_dimension,
             )
 
@@ -235,17 +234,14 @@ class FeatureImitationModifier(BaseDistillationModifier):
     def _initialize_projection(self):
         projection = []
         for layer in range(self.number_of_layers):
-            if self.student_features[layer] == self.teacher_features[layer]:
-                projection.append(None)
-            else:
-                projection.append(
-                    torch.nn.Conv2d(
-                        self.teacher_features[layer],
-                        self.student_features[layer],
-                        1,
-                        bias=False
-                    )
+            projection.append(
+                torch.nn.Conv2d(
+                    self.teacher_features[layer],
+                    self.student_features[layer],
+                    1,
+                    bias=False
                 )
+            )
         self.projection = projection
 
     def _get_scores(self, outputs):
