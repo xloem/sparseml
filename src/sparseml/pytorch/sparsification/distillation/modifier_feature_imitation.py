@@ -21,6 +21,7 @@ via Rank Mimicking and Prediction-guided Feature Imitation"
 """
 
 import torch
+from torch.nn import Module
 import logging
 from typing import Any, List
 
@@ -193,6 +194,14 @@ class FeatureImitationModifier(BaseDistillationModifier):
     def number_of_layers(self) -> int:
         return len(self.student_features)
 
+    @ModifierProp(serializable=False)
+    def projection(self) -> List[Module]:
+        return self._projection
+
+    @projection.setter
+    def projection(self, value: List[Module]):
+        self._projection = value
+
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
         distillation_loss = 0.0
         for layer in range(self.number_of_layers):
@@ -223,12 +232,12 @@ class FeatureImitationModifier(BaseDistillationModifier):
         return loss + self.gain * distillation_loss
 
     def _initialize_projection(self):
-        self.projection = []
+        projection = []
         for layer in range(self.number_of_layers):
             if self.student_features[layer] == self.teacher_features[layer]:
-                self.projection.append(None)
+                projection.append(None)
             else:
-                self.projection.append(
+                projection.append(
                     torch.nn.Conv2d(
                         self.teacher_features[layer],
                         self.student_features[layer],
@@ -236,6 +245,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
                         bias=False
                     )
                 )
+        self.projection = projection
 
     def _get_scores(self, outputs):
         _, scores = torch.split(outputs, (5, self.number_of_classes), dim=self.output_class_dimension)
