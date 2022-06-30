@@ -15,7 +15,6 @@
 from typing import List, Union
 
 import torch
-from torch import Tensor
 
 from sparseml.pytorch.utils.yolo_helpers import compute_iou
 
@@ -56,15 +55,15 @@ class MatchAnchorIOU(object):
         self.anchor_boxes = [self._construct_anchor_box(layer) for layer in range(self.number_of_layers)]
 
     @property
-    def anchors(self) -> List[Tensor]:
+    def anchors(self) -> List[List[int]]:
         return self._anchors
 
     @anchors.setter
-    def anchors(self, value: List[List[int]]) -> List[Tensor]:
+    def anchors(self, value: List[List[int]]) -> List[List[int]]:
         assert len(value) > 0
         for v in value:
             assert len(v) > 1
-        self._anchors = [Tensor(value, dtype=torch.int32)]
+        self._anchors = value
 
     @property
     def layer_resolution(self) -> List[int]:
@@ -123,7 +122,7 @@ class MatchAnchorIOU(object):
     def __call__(self, student_outputs, teacher_outputs, targets):
         device = targets.device
         if self.is_first_epoch:
-            self.anchor_boxes = [b.to(device) for b in self.anchor_boxes]
+            self.anchor_boxes = [[entry.to(device) for entry in b] for b in self.anchor_boxes]
             self.is_first_epoch = False
 
         target_images = self._get_target_images(targets)
