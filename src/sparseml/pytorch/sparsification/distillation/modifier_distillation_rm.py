@@ -95,9 +95,9 @@ class RankMimickingModifier(BaseDistillationModifier):
         )
         self.gain = gain
         self.temperature = temperature
-        self._positive_outputs = _POSITIVE_BOX_METHODS[positive_box_method](
-            **positive_box_method_args
-        )
+        self.positive_box_method = positive_box_method
+        self.positive_box_method_args = positive_box_method_args
+        self._set_positive_outputs()
 
     @ModifierProp()
     def gain(self) -> float:
@@ -129,11 +129,31 @@ class RankMimickingModifier(BaseDistillationModifier):
         """
         self._temperature = value
 
+    @ModifierProp(serializable=False)
+    def positive_outputs(self):
+        return self._positive_outputs
+
+    @ModifierProp()
+    def positive_box_method(self):
+        return self._positive_box_method
+
+    @positive_box_method.setter
+    def positive_box_method(self, value):
+        self._positive_box_method = value
+
+    @ModifierProp()
+    def positive_box_method_args(self):
+        return self._positive_box_method_args
+
+    @positive_box_method.setter
+    def positive_box_method_args(self, value):
+        self._positive_box_method_args = value
+
     def compute_distillation_loss(
         self, student_outputs, teacher_outputs, student_labels, **kwargs
     ):
         distillation_loss = 0.0
-        positive_student_outputs, positive_teacher_outputs = self._positive_outputs(
+        positive_student_outputs, positive_teacher_outputs = self.positive_outputs(
             student_outputs, teacher_outputs, student_labels
         )
         if (
@@ -148,3 +168,8 @@ class RankMimickingModifier(BaseDistillationModifier):
 
     def compute_total_loss(self, loss, distillation_loss):
         return loss + self.gain * distillation_loss
+
+    def _set_positive_output(self):
+        self._positive_outputs = _POSITIVE_BOX_METHODS[self.positive_box_method](
+            **self.positive_box_method_args
+        )
