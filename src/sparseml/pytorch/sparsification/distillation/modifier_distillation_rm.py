@@ -169,7 +169,7 @@ class RankMimickingModifier(BaseDistillationModifier):
     def compute_total_loss(self, loss, distillation_loss):
         return loss + self.gain * distillation_loss
 
-    def _set_positive_output(self):
+    def _set_positive_outputs(self):
         self._positive_outputs = _POSITIVE_BOX_METHODS[self.positive_box_method](
             **self.positive_box_method_args
         )
