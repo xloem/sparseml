@@ -15,6 +15,7 @@
 from typing import List, Union
 
 import torch
+from torch import Tensor
 
 from sparseml.pytorch.utils.yolo_helpers import compute_iou
 
@@ -55,15 +56,15 @@ class MatchAnchorIOU(object):
         self.anchor_boxes = [self._construct_anchor_box(layer) for layer in range(self.number_of_layers)]
 
     @property
-    def anchors(self) -> List[List[int]]:
+    def anchors(self) -> List[Tensor]:
         return self._anchors
 
     @anchors.setter
-    def anchors(self, value: List[List[int]]) -> List[List[int]]:
+    def anchors(self, value: List[List[int]]) -> List[Tensor]:
         assert len(value) > 0
         for v in value:
             assert len(v) > 1
-        self._anchors = value
+        self._anchors = [Tensor(value, dtype=torch.int32)]
 
     @property
     def layer_resolution(self) -> List[int]:
