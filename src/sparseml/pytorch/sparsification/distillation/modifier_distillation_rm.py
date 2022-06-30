@@ -145,7 +145,7 @@ class RankMimickingModifier(BaseDistillationModifier):
     def positive_box_method_args(self):
         return self._positive_box_method_args
 
-    @positive_box_method.setter
+    @positive_box_method_args.setter
     def positive_box_method_args(self, value):
         self._positive_box_method_args = value
 
