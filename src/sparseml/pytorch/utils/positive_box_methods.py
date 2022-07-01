@@ -51,7 +51,6 @@ class MatchAnchorIOU(object):
         self.number_of_layers = len(self.anchors)
         assert len(self.layer_resolution) == 2 * self.number_of_layers
 
-        self.is_first_epoch = True
         self.anchor_boxes = [self._construct_anchor_box(layer) for layer in range(self.number_of_layers)]
 
     @property
@@ -121,9 +120,7 @@ class MatchAnchorIOU(object):
 
     def __call__(self, student_outputs, teacher_outputs, targets):
         device = targets.device
-        if self.is_first_epoch:
-            self.anchor_boxes = [[entry.to(device) for entry in b] for b in self.anchor_boxes]
-            self.is_first_epoch = False
+        self.anchor_boxes = [[entry.to(device) for entry in b] for b in self.anchor_boxes]
 
         target_images = self._get_target_images(targets)
         target_classes = self._get_target_classes(targets)
@@ -147,22 +144,36 @@ class MatchAnchorIOU(object):
                 number_objects = mask.size(0)
                 mask = mask.view(number_objects, -1)
                 if self.max_boxes is not None and mask.size(1) > self.max_boxes:
-                    iou_scores = torch.reshape(iou_scores, (number_objects, -1))
-                    number_boxes = iou_scores.size(1)
-                    _, sorting_indices = torch.sort(iou_scores, descending=True)
-                    sorting_indices = sorting_indices[:, :self.max_boxes]
-                    sorting_indices += torch.arange(number_objects, device=device, dtype=torch.int32).view(-1, 1) * number_boxes
-                    sorting_indices = torch.flatten(sorting_indices)
+                    with torch.no_grad():
+                        iou_scores = torch.reshape(iou_scores, (number_objects, -1))
+                        number_boxes = iou_scores.size(1)
+                        _, sorting_indices = torch.sort(iou_scores, descending=True)
+                        sorting_indices = sorting_indices[:, :self.max_boxes]
+                        sorting_indices += torch.arange(number_objects, device=device, dtype=torch.int32).view(-1, 1) * number_boxes
+                        sorting_indices = torch.flatten(sorting_indices)
+
                     mask = torch.flatten(mask)
                     mask = mask[sorting_indices]
                     mask = torch.reshape(mask, (number_objects, -1))
                 else:
                     sorting_indices = None
 
-                student_scores = self._get_select_scores(student_outputs[layer], target_images, target_classes, mask, sorting_indices)
+                student_scores = self._get_select_scores(
+                    student_outputs[layer],
+                    target_images,
+                    target_classes,
+                    mask,
+                    sorting_indices,
+                )
 
                 with torch.no_grad():
-                    teacher_scores = self._get_select_scores(teacher_outputs[layer], target_images, target_classes, mask, sorting_indices)
+                    teacher_scores = self._get_select_scores(
+                        teacher_outputs[layer],
+                        target_images,
+                        target_classes,
+                        mask,
+                        sorting_indices,
+                    )
 
                 positive_student_outputs.append(student_scores)
                 positive_teacher_outputs.append(teacher_scores)
@@ -178,9 +189,8 @@ class MatchAnchorIOU(object):
         scores = self._align_dimensions_to_anchor_boxes(outputs)
         scores = self._get_class_scores(scores)
         batch_size = scores.size(0)
-        number_classes = scores.size(1)
-        scores = torch.reshape(scores, (batch_size * number_classes, -1))
-        indices = images * number_classes + classes
+        scores = torch.reshape(scores, (batch_size * self.number_of_classes, -1))
+        indices = images * self.number_of_classes + classes
         scores = scores[indices]
         number_objects = scores.size(0)
         if sorting_indices is not None:
