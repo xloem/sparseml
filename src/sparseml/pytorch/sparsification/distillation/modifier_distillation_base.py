@@ -52,7 +52,7 @@ def kl_logsoftmax(
         temperature: Union[float, Tensor],
         dim: int = -1
 ) -> Tensor:
-    number_items = x.numel() / y.size(dim)
+    number_items = x.numel() / x.size(dim)
     return TF.kl_div(
         input=TF.log_softmax(x / temperature, dim=dim),
         target=TF.log_softmax(y / temperature, dim=dim),
