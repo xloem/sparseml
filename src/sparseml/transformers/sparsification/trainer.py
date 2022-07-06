@@ -333,18 +333,6 @@ class RecipeManagerTrainerInterface:
         )
         _LOGGER.warning("Overrode the lr_scheduler from SparseML recipe")
 
-
-    def compute_loss(self, model, inputs, return_outputs=False):
-        """
-        How the loss is computed by Trainer. By default, all models return the loss in the first element.
-        Subclass and override for custom behavior.
-        """
-        outputs = model(**inputs)
-        loss = None
-
-        return (loss, outputs) if return_outputs else loss
-
-    '''
     def compute_loss(
         self, model: Module, inputs: Dict[str, Any], return_outputs: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Any]]:
@@ -413,7 +401,6 @@ class RecipeManagerTrainerInterface:
         )
 
         return (loss, student_outputs) if return_outputs else loss
-    '''
 
     def prediction_step(
         self,
