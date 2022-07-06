@@ -53,7 +53,8 @@ from sparseml.transformers.sparsification import (
     postprocess_qa_predictions,
 )
 from sparseml.transformers.utils import SparseAutoModel, get_shared_tokenizer_src
-
+from deepsparse import Engine
+from deepsparse.benchmark import ORTEngine
 
 # Will error if the minimal version of Transformers is not installed. Remove at your
 # own risks.
@@ -90,10 +91,6 @@ class ModelArguments:
             )
         }
     )
-    distill_teacher: Optional[str] = field(
-        default=None,
-        metadata={"help": "Teacher model which needs to be a trained QA model"},
-    )
     config_name: Optional[str] = field(
         default=None,
         metadata={
@@ -115,15 +112,6 @@ class ModelArguments:
             ),
         },
     )
-    model_revision: str = field(
-        default="main",
-        metadata={
-            "help": (
-                "The specific model version to use (can be a branch name, "
-                "tag name or commit id)."
-            ),
-        },
-    )
     use_auth_token: bool = field(
         default=False,
         metadata={
@@ -132,6 +120,35 @@ class ModelArguments:
                 "(necessary to use this script with private models)."
             ),
         },
+    )
+    engine: str = field(
+        default="deepsparse",
+        metadata={
+            "help": (
+                "Engine to be used for model evaluation, "
+                "deepsparse or onnxruntime"
+            )
+        }
+    )
+    num_cores: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The number of physical cores to run the model on. "
+                "If more cores are requested than are available on a "
+                "single socket, the engine will try to distribute them "
+                "evenly across as few sockets as possible"
+            )
+        }
+    )
+    num_streams: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The max number of requests the model can handle "
+                "concurrently"
+            )
+        }
     )
 
 
@@ -322,7 +339,6 @@ class DataTrainingArguments:
                     "json",
                 ], "`test_file` should be a csv or a json file."
 
-
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -356,28 +372,6 @@ def main():
         f"16-bits training: {training_args.fp16}"
     )
     _LOGGER.info(f"Training/evaluation parameters {training_args}")
-
-    # Detecting last checkpoint.
-    last_checkpoint = None
-    if (
-        os.path.isdir(training_args.output_dir)
-        and training_args.do_train
-        and not training_args.overwrite_output_dir
-    ):
-        last_checkpoint = get_last_checkpoint(training_args.output_dir)
-        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
-            raise ValueError(
-                f"Output directory ({training_args.output_dir}) already exists and is "
-                "not empty. Use --overwrite_output_dir to overcome."
-            )
-        elif (
-            last_checkpoint is not None and training_args.resume_from_checkpoint is None
-        ):
-            _LOGGER.info(
-                f"Checkpoint detected, resuming training at {last_checkpoint}. "
-                "To avoid this behavior, change the `--output_dir` or add "
-                "`--overwrite_output_dir` to train from scratch."
-            )
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
@@ -436,28 +430,22 @@ def main():
         use_auth_token=True if model_args.use_auth_token else None,
     )
 
-    model, teacher = SparseAutoModel.question_answering_from_pretrained_distil(
-        model_name_or_path=model_args.model_name_or_path,
-        model_kwargs={
-            "config": config,
-            "cache_dir": model_args.cache_dir,
-            "revision": model_args.model_revision,
-            "use_auth_token": True if model_args.use_auth_token else None,
-        },
-        teacher_name_or_path=model_args.distill_teacher,
-        teacher_kwargs={
-            "cache_dir": model_args.cache_dir,
-            "use_auth_token": True if model_args.use_auth_token else None,
-        },
-    )
+    if model_args.engine == "deepsparse":
+        model = Engine(
+            model_args.model_name_or_path,
+            training_args.per_device_eval_batch_size,
+            model_args.num_cores,
+            model_args.num_streams,
+        )
+    else:
+        model = ORTEngine(
+            model_args.model_name_or_path,
+            training_args.per_device_eval_batch_size,
+            model_args.num_cores,
+        )
 
-    tokenizer_src = (
-        model_args.tokenizer_name
-        if model_args.tokenizer_name
-        else get_shared_tokenizer_src(model, teacher)
-    )
     tokenizer = AutoTokenizer.from_pretrained(
-        tokenizer_src,
+        model_args.tokenizer_name,
         cache_dir=model_args.cache_dir,
         use_fast=True,
         revision=model_args.model_revision,
