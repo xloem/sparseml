@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import datasets
+import torch.nn
 import transformers
 from datasets import load_dataset, load_metric
 from transformers import (
@@ -43,10 +44,11 @@ from transformers import (
     TrainingArguments,
     default_data_collator,
     set_seed,
+
 )
-from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
+from transformers.modeling_outputs import QuestionAnsweringModelOutput
 
 from sparseml.transformers.sparsification import (
     QuestionAnsweringTrainer,
@@ -109,6 +111,15 @@ class ModelArguments:
             "help": (
                 "Path to directory to store the pretrained models downloaded from "
                 "huggingface.co"
+            ),
+        },
+    )
+    model_revision: str = field(
+        default="main",
+        metadata={
+            "help": (
+                "The specific model version to use (can be a branch name, "
+                "tag name or commit id)."
             ),
         },
     )
@@ -339,6 +350,75 @@ class DataTrainingArguments:
                     "json",
                 ], "`test_file` should be a csv or a json file."
 
+class onnx_model(torch.nn.Module):
+    def __init__(self, model_path, batch_size, engine, num_cores, num_streams):
+        super().__init__()
+        if engine == "deepsparse":
+            self.model = Engine(
+                model_path + "/model.onnx",
+                batch_size,
+                num_cores,
+                num_streams,
+            )
+        else:
+            self.model = ORTEngine(
+                model_path + "/model.onnx",
+                batch_size,
+                num_cores,
+            )
+
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        head_mask=None,
+        inputs_embeds=None,
+        start_positions=None,
+        end_positions=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+    ):
+        x = [
+            input_ids.detach().numpy(),
+            attention_mask.detach().numpy(),
+        ]
+
+        logits = torch.Tensor(self.model(x))
+
+        start_logits, end_logits = logits.split(1, dim=0)
+        start_logits = start_logits.squeeze(0).contiguous()  # (bs, max_query_len)
+        end_logits = end_logits.squeeze(0).contiguous()  # (bs, max_query_len)
+
+        total_loss = None
+        if start_positions is not None and end_positions is not None:
+            # If we are on multi-GPU, split add a dimension
+            if len(start_positions.size()) > 1:
+                start_positions = start_positions.squeeze(-1)
+            if len(end_positions.size()) > 1:
+                end_positions = end_positions.squeeze(-1)
+            # sometimes the start/end positions are outside our model inputs, we ignore these terms
+            ignored_index = start_logits.size(1)
+            start_positions = start_positions.clamp(0, ignored_index)
+            end_positions = end_positions.clamp(0, ignored_index)
+
+            loss_fct = torch.nn.CrossEntropyLoss(ignore_index=ignored_index)
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            total_loss = (start_loss + end_loss) / 2
+
+        if not return_dict:
+            output = (start_logits, end_logits)
+            return ((total_loss,) + output) if total_loss is not None else output
+
+        return QuestionAnsweringModelOutput(
+            loss=total_loss,
+            start_logits=start_logits,
+            end_logits=end_logits,
+            hidden_states=None,
+            attentions=None,
+        )
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -416,33 +496,7 @@ def main():
     # (from files, python dict, pandas DataFrame, etc) at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
 
-    # Load pretrained model and tokenizer
-    #
-    # Distributed training:
-    # The .from_pretrained methods guarantee that only one local process can
-    # concurrently download model & vocab.
-    config = AutoConfig.from_pretrained(
-        model_args.config_name
-        if model_args.config_name
-        else model_args.model_name_or_path,
-        cache_dir=model_args.cache_dir,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
-    )
-
-    if model_args.engine == "deepsparse":
-        model = Engine(
-            model_args.model_name_or_path,
-            training_args.per_device_eval_batch_size,
-            model_args.num_cores,
-            model_args.num_streams,
-        )
-    else:
-        model = ORTEngine(
-            model_args.model_name_or_path,
-            training_args.per_device_eval_batch_size,
-            model_args.num_cores,
-        )
+    model = onnx_model(model_args.model_name_or_path, training_args.per_device_eval_batch_size, model_args.engine, model_args.num_cores, model_args.num_streams)
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name,
@@ -762,7 +816,7 @@ def main():
         recipe=data_args.recipe,
         recipe_args=data_args.recipe_args,
         metadata_args=metadata_args,
-        teacher=teacher,
+        teacher=None,
         args=training_args,
         data_args=data_args,
         train_dataset=train_dataset if training_args.do_train else None,
