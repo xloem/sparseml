@@ -371,6 +371,7 @@ class onnx_model(torch.nn.Module):
         self,
         input_ids=None,
         attention_mask=None,
+        token_type_ids=None,
         head_mask=None,
         inputs_embeds=None,
         start_positions=None,
@@ -382,6 +383,7 @@ class onnx_model(torch.nn.Module):
         x = [
             input_ids.detach().numpy(),
             attention_mask.detach().numpy(),
+            token_type_ids.detach().numpy(),
         ]
 
         logits = torch.Tensor(self.model(x))
