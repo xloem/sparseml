@@ -225,8 +225,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
 
             distillation_loss += fi_loss
 
-        batch_size = student_outputs["output"][layer].size(0)
-        return distillation_loss * batch_size / self.number_of_layers
+        return distillation_loss / self.number_of_layers
 
     def compute_total_loss(self, loss, distillation_loss):
         return loss + self.gain * distillation_loss
