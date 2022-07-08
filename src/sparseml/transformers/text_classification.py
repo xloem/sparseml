@@ -52,7 +52,9 @@ from transformers.utils.versions import require_version
 
 from sparseml.transformers.sparsification import Trainer
 from sparseml.transformers.utils import SparseAutoModel, get_shared_tokenizer_src
-
+import torch
+from deepsparse import Engine
+from deepsparse.benchmark import ORTEngine
 
 # Will error if the minimal version of Transformers is not installed.
 # Remove at your own risks.
@@ -301,7 +303,106 @@ class ModelArguments:
             "(necessary to use this script with private models)"
         },
     )
+    engine: str = field(
+        default="deepsparse",
+        metadata={
+            "help": (
+                "Engine to be used for model evaluation, "
+                "deepsparse or onnxruntime"
+            )
+        }
+    )
+    num_cores: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The number of physical cores to run the model on. "
+                "If more cores are requested than are available on a "
+                "single socket, the engine will try to distribute them "
+                "evenly across as few sockets as possible"
+            )
+        }
+    )
+    num_streams: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The max number of requests the model can handle "
+                "concurrently"
+            )
+        }
+    )
 
+class onnx_model(torch.nn.Module):
+    def __init__(self, model_path, batch_size, engine, num_cores, num_streams):
+        super().__init__()
+        if engine == "deepsparse":
+            self.model = Engine(
+                model_path + "/model.onnx",
+                batch_size,
+                num_cores,
+                num_streams,
+            )
+        else:
+            self.model = ORTEngine(
+                model_path + "/model.onnx",
+                batch_size,
+                num_cores,
+            )
+
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        start_positions=None,
+        end_positions=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+    ):
+        x = [
+            input_ids.detach().numpy(),
+            attention_mask.detach().numpy(),
+            token_type_ids.detach().numpy(),
+        ]
+
+        logits = torch.Tensor(self.model(x))
+
+        start_logits, end_logits = logits.split(1, dim=0)
+        start_logits = start_logits.squeeze(0).contiguous()  # (bs, max_query_len)
+        end_logits = end_logits.squeeze(0).contiguous()  # (bs, max_query_len)
+
+        total_loss = None
+        if start_positions is not None and end_positions is not None:
+            # If we are on multi-GPU, split add a dimension
+            if len(start_positions.size()) > 1:
+                start_positions = start_positions.squeeze(-1)
+            if len(end_positions.size()) > 1:
+                end_positions = end_positions.squeeze(-1)
+            # sometimes the start/end positions are outside our model inputs, we ignore these terms
+            ignored_index = start_logits.size(1)
+            start_positions = start_positions.clamp(0, ignored_index)
+            end_positions = end_positions.clamp(0, ignored_index)
+
+            loss_fct = torch.nn.CrossEntropyLoss(ignore_index=ignored_index)
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            total_loss = (start_loss + end_loss) / 2
+
+        if not return_dict:
+            output = (start_logits, end_logits)
+            return ((total_loss,) + output) if total_loss is not None else output
+
+        return QuestionAnsweringModelOutput(
+            loss=total_loss,
+            start_logits=start_logits,
+            end_logits=end_logits,
+            hidden_states=None,
+            attentions=None,
+        )
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -457,35 +558,7 @@ def main():
     # In distributed training, the .from_pretrained methods guarantee that only one
     # local process can concurrently download model & vocab.
 
-    config = AutoConfig.from_pretrained(
-        model_args.config_name
-        if model_args.config_name
-        else model_args.model_name_or_path,
-        num_labels=num_labels,
-        finetuning_task=data_args.task_name,
-        cache_dir=model_args.cache_dir,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
-    )
-
-    model, teacher = SparseAutoModel.text_classification_from_pretrained_distil(
-        model_name_or_path=(
-            model_args.tokenizer_name
-            if model_args.tokenizer_name
-            else model_args.model_name_or_path
-        ),
-        model_kwargs={
-            "config": config,
-            "cache_dir": model_args.cache_dir,
-            "revision": model_args.model_revision,
-            "use_auth_token": True if model_args.use_auth_token else None,
-        },
-        teacher_name_or_path=model_args.distill_teacher,
-        teacher_kwargs={
-            "cache_dir": model_args.cache_dir,
-            "use_auth_token": True if model_args.use_auth_token else None,
-        },
-    )
+    model = onnx_model(model_args.model_name_or_path, training_args.per_device_eval_batch_size, model_args.engine, model_args.num_cores, model_args.num_streams)
 
     teacher_tokenizer = None
     tokenizer_kwargs = dict(
@@ -494,24 +567,8 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-    if not model_args.use_teacher_tokenizer:
-        tokenizer_src = (
-            model_args.tokenizer_name
-            if model_args.tokenizer_name
-            else get_shared_tokenizer_src(model, teacher)
-        )
-    else:
-        tokenizer_src = (
-            model_args.tokenizer_name
-            if model_args.tokenizer_name
-            else model.config._name_or_path
-        )
-        teacher_tokenizer = AutoTokenizer.from_pretrained(
-            teacher.config._name_or_path,
-            **tokenizer_kwargs,
-        )
     tokenizer = AutoTokenizer.from_pretrained(
-        tokenizer_src,
+        model_args.tokenizer_name,
         **tokenizer_kwargs,
     )
 
