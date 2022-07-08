@@ -1583,7 +1583,7 @@ def quantize_torch_qat_export(
 
     _convert_quantizable_gemm_no_activations(model)
     _quantize_qat_embedding(model)
-    quantize_resnet_identity_add_inputs(model)
+    #quantize_resnet_identity_add_inputs(model)
     #quantized_residual_add_optim(model)
     _remove_duplicate_quantize_ops(model)
     _cleanup_unused_quants(model)
