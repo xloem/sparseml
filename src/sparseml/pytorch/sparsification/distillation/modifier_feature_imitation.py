@@ -91,6 +91,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
         gain: float = 1.5,
         output_format: str = "bayxo",
         feature_format: str = "boyx",
+        objectness_multiply: bool = False,
     ):
         super().__init__(
             start_epoch=start_epoch,
@@ -105,6 +106,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self.gain = gain
         self.output_format = output_format
         self.feature_format = feature_format
+        self.objectness_multiply = objectness_multiply
         self._initialize_projection()
 
     @BaseModifier.sparsification_types.getter
@@ -202,28 +204,52 @@ class FeatureImitationModifier(BaseDistillationModifier):
     def projection(self, value: List[Module]):
         self._projection = value
 
+    @ModifierProp()
+    def objectness_multiply(self):
+        return self._objectness_multiply
+
+    @objectness_multiply.setter
+    def objectness_multiply(self, value):
+        self._objectness_multiply = value
+
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
         distillation_loss = 0.0
         for layer in range(self.number_of_layers):
-            student_class_scores = self._get_scores(student_outputs["output"][layer])
-            teacher_class_scores = self._get_scores(teacher_outputs["output"][layer])
+            #student_class_scores = self._get_scores(student_outputs["output"][layer])
+            #teacher_class_scores = self._get_scores(teacher_outputs["output"][layer])
+            '''
             projection_weight = torch.mean(
                 (student_class_scores - teacher_class_scores)**2,
                 dim=(self.output_anchor_dimension, self.output_class_dimension)
             )
-            teacher_features = teacher_outputs["feature"][layer]
-            self.projection[layer] = self.projection[layer].to(teacher_features.device)
-            self.projection[layer] = self.projection[layer].to(teacher_features.dtype)
-            teacher_projected_features = self.projection[layer](teacher_features)
+            projection_weight = torch.mean(
+                torch.abs(student_class_scores - teacher_class_scores),
+                dim=(self.output_anchor_dimension, self.output_class_dimension)
+            )
+            '''
 
+            student_features = student_outputs["feature"][layer]
+            self.projection[layer] = self.projection[layer].to(student_features.device)
+            self.projection[layer] = self.projection[layer].to(student_features.dtype)
+            student_projected_features = self.projection[layer](student_features)
+
+            '''
             feature_difference = torch.mean(
                 (student_outputs["feature"][layer] - teacher_projected_features)**2,
                 dim=self.feature_dimension,
             )
+            feature_difference = torch.mean(
+                torch.abs(student_outputs["feature"][layer] - teacher_projected_features),
+                dim=self.feature_dimension,
+            )
 
-            fi_loss = torch.mean(projection_weight * feature_difference)
+            fi_loss = torch.mean((projection_weight * feature_difference)**2)
 
             distillation_loss += fi_loss
+            '''
+            distillation_loss += torch.mean(
+                torch.abs(student_projected_features - teacher_outputs["feature"][layer])**2,
+            )
 
         return distillation_loss / self.number_of_layers
 
@@ -235,15 +261,21 @@ class FeatureImitationModifier(BaseDistillationModifier):
         for layer in range(self.number_of_layers):
             projection.append(
                 torch.nn.Conv2d(
-                    self.teacher_features[layer],
-                    self.student_features[layer],
-                    1,
+                    in_channels=self.student_features[layer],
+                    out_channels=self.teacher_features[layer],
+                    kernel_size=1,
                     bias=False
                 )
             )
+            #weights = torch.eye(self.student_features[layer], self.teacher_features[layer])
+            #weights = weights.view(self.student_features[layer], self.teacher_features[layer], 1, 1)
+            #projection[-1].weight.data.copy_(weights)
         self.projection = projection
 
     def _get_scores(self, outputs):
-        _, scores = torch.split(outputs, (5, self.number_of_classes), dim=self.output_class_dimension)
-        return torch.sigmoid(scores)
+        _, objectness, scores = torch.split(outputs, (4, 1, self.number_of_classes), dim=self.output_class_dimension)
+        scores = torch.sigmoid(scores)
+        if self.objectness_multiply:
+            scores = scores * torch.sigmoid(objectness)
+        return scores
 
