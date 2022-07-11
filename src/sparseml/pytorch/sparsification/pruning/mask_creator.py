@@ -26,6 +26,8 @@ from typing import List, Optional, Union
 import torch
 from torch import Tensor
 
+from sparseml.pytorch.utils import memory_aware_threshold
+
 
 __all__ = [
     "PruningMaskCreator",
@@ -187,13 +189,12 @@ class UnstructuredPruningMaskCreator(PruningMaskCreator):
             return tensor.new_tensor([])
 
         lookup_index = round(sparsity * tensor.numel()) - 1
-
         if lookup_index < 0:
             lookup_index = 0
         elif lookup_index > tensor.numel():
             lookup_index = tensor.numel()
 
-        return torch.kthvalue(tensor.view(-1), lookup_index + 1)[0]
+        return memory_aware_threshold(tensor, lookup_index)
 
     def _flatten_and_stack_tensors(self, tensors: List[Tensor]) -> Tensor:
         total_elements = sum(tensor.numel() for tensor in tensors)
