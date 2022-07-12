@@ -256,6 +256,12 @@ class QATWrapper(Module):
         num_input_quant_stubs = num_inputs + len(self.kwarg_input_names)
 
         self.forward_fn = forward_fn
+        qconfig_ = get_qat_qconfig(qproperties)
+        qconfig = torch_quantization.QConfig(
+            activation=torch.nn.Identity,
+            weight=qconfig_.weight,
+        )
+        self.forward_fn.qconfig = qconfig
 
         self.input_qconfigs = self._load_qconfigs(
             name="input_qconfigs",
@@ -515,8 +521,10 @@ def remove_activation_qat_by_layer_name(module: Module, layer_class_names: List[
         e.x. ["Linear"]
     """
     for submodule in module.modules():
-        if submodule.__class__.__name__ in layer_class_names and hasattr(
-            submodule, "qconfig"
+        if (
+            submodule.__class__.__name__ in layer_class_names
+            and hasattr(submodule, "qconfig")
+            and hasattr(submodule.qconfig, "weight")
         ):
             submodule.qconfig = torch_quantization.QConfig(
                 activation=torch.nn.Identity,
