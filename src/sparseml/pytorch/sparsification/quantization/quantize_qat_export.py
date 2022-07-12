@@ -1574,7 +1574,7 @@ def quantize_torch_qat_export(
     _convert_single_constants_to_initializers(model)
     _delete_repeated_qat_blocks(model)
     _quantize_qat_embedding(model)
-    _propagate_mobilebert_embedding_quantization
+    _propagate_mobilebert_embedding_quantization(model)
     _convert_quantizable_matmul(model)
     _convert_quantizable_matmul_and_add(model)
     _fold_relu_quants(model)
@@ -1751,7 +1751,7 @@ def _propagate_mobilebert_embedding_quantization(model: ModelProto):
     |             |
     |           OUTPUT
     """
-    conversion_count = 0
+    converted_nodes = 0
     gather_nodes = [n for n in model.graph.node if n.op_type in ["Gather"]]
     graph = ONNXGraph(model)
     for gather_node in gather_nodes:
@@ -1760,7 +1760,7 @@ def _propagate_mobilebert_embedding_quantization(model: ModelProto):
         if not embedding_initializer:
             continue
 
-        dequant_node = graph.get_node_single_child(gather_node, 0)
+        dequant_node = graph.get_node_single_child(gather_node)
         if not dequant_node or dequant_node.op_type != "DequantizeLinear":
             continue
 
@@ -1770,12 +1770,12 @@ def _propagate_mobilebert_embedding_quantization(model: ModelProto):
         concat_node = None
         for branch_node in graph.get_node_children(dequant_node):
             if branch_node.op_type == "Slice":
-                pad_node = graph.get_node_single_child(branch_node, 0)
+                pad_node = graph.get_node_single_child(branch_node)
                 if not pad_node or pad_node.op_type != "Pad":
                     valid = False
                     break
 
-                concat_node_ = graph.get_node_single_child(pad_node, 0)
+                concat_node_ = graph.get_node_single_child(pad_node)
                 if not concat_node_ or concat_node_.op_type != "Concat":
                     valid = False
                     break
@@ -1787,8 +1787,8 @@ def _propagate_mobilebert_embedding_quantization(model: ModelProto):
                     break
             elif branch_node.op_type == "Concat":
                 if concat_node is None:
-                    concat_node = concat_node_
-                elif concat_node_ == concat_node:
+                    concat_node = branch_node
+                elif branch_node != concat_node:
                     valid = False
                     break
             else:
@@ -1803,14 +1803,21 @@ def _propagate_mobilebert_embedding_quantization(model: ModelProto):
             if branch_node.op_type == "Slice":
                 branch_node.input[0] = gather_node.output[0]
 
-        for id, input_node in enumerate(graph.get_node_parents(concat_node)):
-            if input_node == dequant_node.output[0]:
+        for id, input_name in enumerate(concat_node.input):
+            if input_name == dequant_node.output[0]:
                 break
 
         concat_node.input[id] = gather_node.output[0]
         temp = concat_node.output[0]
         concat_node.output[0] = dequant_node.output[0]
-        dequant_node.outputp[0] = temp
+        dequant_node.output[0] = temp
         dequant_node.input[0] = concat_node.output[0]
 
         graph.update()
+
+        converted_nodes += 1
+
+    graph.delete_unused_initializers()
+
+    if converted_nodes > 0:
+        _LOGGER.info(f"Propagated {converted_nodes} DequantizeLinear node(s) through Concat")
