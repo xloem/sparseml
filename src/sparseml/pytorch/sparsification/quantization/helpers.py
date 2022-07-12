@@ -256,6 +256,7 @@ class QATWrapper(Module):
         num_input_quant_stubs = num_inputs + len(self.kwarg_input_names)
 
         self.forward_fn = forward_fn
+        # Add weight qconfig to forward_fn (in case it has weights)
         qconfig_ = get_qat_qconfig(qproperties)
         qconfig = torch_quantization.QConfig(
             activation=torch.nn.Identity,
