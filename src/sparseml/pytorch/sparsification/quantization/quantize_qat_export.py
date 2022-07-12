@@ -1380,9 +1380,9 @@ def _quantize_qat_embedding(model: ModelProto):
     |      |         |
     |         Gather
     |           |
-    |       QuantizeLinear
+    |       QuantizeLinear (Optional)
     |           |
-    |       DequantizeLinear
+    |       DequantizeLinear (Optional)
     |           |
     |         OUTPUT
 
@@ -1571,11 +1571,12 @@ def quantize_torch_qat_export(
         model = deepcopy(model)
 
     _fold_qat_conv_bns(model)
-    _fold_relu_quants(model)
     _convert_single_constants_to_initializers(model)
     _delete_repeated_qat_blocks(model)
+    _quantize_qat_embedding(model)
     _convert_quantizable_matmul(model)
     _convert_quantizable_matmul_and_add(model)
+    _fold_relu_quants(model)
 
     # only convert to either ConvInteger or QLinearConv (legacy)
     if not use_qlinearconv:
@@ -1583,7 +1584,6 @@ def quantize_torch_qat_export(
     _convert_quantizable_ops(model, convert_qlinearconv=use_qlinearconv)
 
     _convert_quantizable_gemm_no_activations(model)
-    _quantize_qat_embedding(model)
     quantize_resnet_identity_add_inputs(model)
     _remove_duplicate_quantize_ops(model)
     _cleanup_unused_quants(model)
@@ -1719,3 +1719,30 @@ def skip_onnx_input_quantize(
 
     if output_file_path:
         onnx.save(model, output_file_path)
+
+def _propagate_embedding_quantization_through_concat(model: ModelProto):
+    """
+    A pass for propagating embedding quantizations through concat
+
+    Starting with:
+    |           GATHER     (UINT8 data initializer)
+    |           |
+    |       DequantizeLinear
+    |         |   |   |
+    |        ... ... ...
+    |         |   |   |
+    |         Concat
+    |           |
+    |         OUTPUT
+
+    Converts to:
+    |           GATHER     (UINT8 data initializer)
+    |         |   |   |
+    |        ... ... ...
+    |         |   |   |
+    |         Concat
+    |           |
+    |       DequantizeLinear
+    |           |
+    |         OUTPUT
+    """
