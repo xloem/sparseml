@@ -215,41 +215,44 @@ class FeatureImitationModifier(BaseDistillationModifier):
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
         distillation_loss = 0.0
         for layer in range(self.number_of_layers):
-            #student_class_scores = self._get_scores(student_outputs["output"][layer])
-            #teacher_class_scores = self._get_scores(teacher_outputs["output"][layer])
+            student_class_scores = self._get_scores(student_outputs["output"][layer])
+            teacher_class_scores = self._get_scores(teacher_outputs["output"][layer])
             '''
             projection_weight = torch.mean(
                 (student_class_scores - teacher_class_scores)**2,
                 dim=(self.output_anchor_dimension, self.output_class_dimension)
             )
+            '''
             projection_weight = torch.mean(
                 torch.abs(student_class_scores - teacher_class_scores),
                 dim=(self.output_anchor_dimension, self.output_class_dimension)
             )
-            '''
 
             student_features = student_outputs["feature"][layer]
             self.projection[layer] = self.projection[layer].to(student_features.device)
             self.projection[layer] = self.projection[layer].to(student_features.dtype)
             student_projected_features = self.projection[layer](student_features)
 
-            '''
             feature_difference = torch.mean(
-                (student_outputs["feature"][layer] - teacher_projected_features)**2,
+                (student_projected_features - teacher_outputs["feature"][layer])**2,
                 dim=self.feature_dimension,
             )
+            '''
             feature_difference = torch.mean(
                 torch.abs(student_outputs["feature"][layer] - teacher_projected_features),
                 dim=self.feature_dimension,
             )
+            '''
 
-            fi_loss = torch.mean((projection_weight * feature_difference)**2)
+            #fi_loss = torch.mean((projection_weight * feature_difference)**2)
+            fi_loss = torch.mean((projection_weight * feature_difference))
 
             distillation_loss += fi_loss
             '''
             distillation_loss += torch.mean(
                 torch.abs(student_projected_features - teacher_outputs["feature"][layer])**2,
             )
+            '''
 
         return distillation_loss / self.number_of_layers
 
