@@ -1574,6 +1574,7 @@ def quantize_torch_qat_export(
     _convert_single_constants_to_initializers(model)
     _delete_repeated_qat_blocks(model)
     _quantize_qat_embedding(model)
+    _propagate_mobilebert_embedding_quantization
     _convert_quantizable_matmul(model)
     _convert_quantizable_matmul_and_add(model)
     _fold_relu_quants(model)
@@ -1720,7 +1721,7 @@ def skip_onnx_input_quantize(
     if output_file_path:
         onnx.save(model, output_file_path)
 
-def _propagate_embedding_quantization_through_concat(model: ModelProto):
+def _propagate_mobilebert_embedding_quantization(model: ModelProto):
     """
     A pass for propagating embedding quantizations through concat
 
@@ -1729,20 +1730,87 @@ def _propagate_embedding_quantization_through_concat(model: ModelProto):
     |           |
     |       DequantizeLinear
     |         |   |   |
-    |        ... ... ...
+    |         | Slice Slice
     |         |   |   |
-    |         Concat
-    |           |
-    |         OUTPUT
+    |         |  Pad Pad
+    |         |   |   |
+    |           Concat
+    |             |
+    |           OUTPUT
 
     Converts to:
     |           GATHER     (UINT8 data initializer)
     |         |   |   |
-    |        ... ... ...
+    |         | Slice Slice
     |         |   |   |
-    |         Concat
-    |           |
+    |         |  Pad Pad
+    |         |   |   |
+    |           Concat
+    |             |
     |       DequantizeLinear
-    |           |
-    |         OUTPUT
+    |             |
+    |           OUTPUT
     """
+    conversion_count = 0
+    gather_nodes = [n for n in model.graph.node if n.op_type in ["Gather"]]
+    graph = ONNXGraph(model)
+    for gather_node in gather_nodes:
+        # find quantized weight
+        embedding_initializer = graph.get_init_by_name(gather_node.input[0])
+        if not embedding_initializer:
+            continue
+
+        dequant_node = graph.get_node_single_child(gather_node, 0)
+        if not dequant_node or dequant_node.op_type != "DequantizeLinear":
+            continue
+
+        # loop through the children of the dequantize node and check if they
+        # are composed of slice + pad nodes and converge at the same concat node
+        valid = True
+        concat_node = None
+        for branch_node in graph.get_node_children(dequant_node):
+            if branch_node.op_type == "Slice":
+                pad_node = graph.get_node_single_child(branch_node, 0)
+                if not pad_node or pad_node.op_type != "Pad":
+                    valid = False
+                    break
+
+                concat_node_ = graph.get_node_single_child(pad_node, 0)
+                if not concat_node_ or concat_node_.op_type != "Concat":
+                    valid = False
+                    break
+
+                if concat_node is None:
+                    concat_node = concat_node_
+                elif concat_node != concat_node_:
+                    valid = False
+                    break
+            elif branch_node.op_type == "Concat":
+                if concat_node is None:
+                    concat_node = concat_node_
+                elif concat_node_ == concat_node:
+                    valid = False
+                    break
+            else:
+                valid = False
+                break
+
+        if not valid or not concat_node:
+            continue
+
+        # switch position of dequantize node
+        for branch_node in graph.get_node_children(dequant_node):
+            if branch_node.op_type == "Slice":
+                branch_node.input[0] = gather_node.output[0]
+
+        for id, input_node in enumerate(graph.get_node_parents(concat_node)):
+            if input_node == dequant_node.output[0]:
+                break
+
+        concat_node.input[id] = gather_node.output[0]
+        temp = concat_node.output[0]
+        concat_node.output[0] = dequant_node.output[0]
+        dequant_node.outputp[0] = temp
+        dequant_node.input[0] = concat_node.output[0]
+
+        graph.update()
