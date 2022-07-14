@@ -1760,6 +1760,10 @@ def _propagate_mobilebert_embedding_quantization(model: ModelProto):
         if not embedding_initializer:
             continue
 
+        embedding_array = numpy_helper.to_array(embedding_initializer)
+        if embedding_array.dtype != numpy.uint8:
+            continue
+
         dequant_node = graph.get_node_single_child(gather_node)
         if not dequant_node or dequant_node.op_type != "DequantizeLinear":
             continue
@@ -1802,6 +1806,14 @@ def _propagate_mobilebert_embedding_quantization(model: ModelProto):
         for branch_node in graph.get_node_children(dequant_node):
             if branch_node.op_type == "Slice":
                 branch_node.input[0] = gather_node.output[0]
+                pad_node = graph.get_node_single_child(branch_node)
+                pad_value = graph.get_init_by_name(pad_node.input[2])
+                pad_value_array = numpy_helper.to_array(pad_value)
+                pad_value_array = pad_value_array + 128
+                pad_value_array = pad_value_array.astype(numpy.uint8)
+                model.graph.initializer.remove(pad_value)
+                pad_value = numpy_helper.from_array(pad_value_array, name=pad_value.name)
+                model.graph.initializer.append(pad_value)
 
         for id, input_name in enumerate(concat_node.input):
             if input_name == dequant_node.output[0]:
