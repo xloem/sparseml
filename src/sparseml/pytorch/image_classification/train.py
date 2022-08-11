@@ -659,6 +659,7 @@ def main(
     train(
         trainer=trainer,
         save_dir=save_dir,
+        dataset_name= dataset,
         max_eval_steps=max_eval_steps,
         eval_mode=eval_mode,
         is_main_process=is_main_process,
@@ -671,6 +672,7 @@ def main(
 def train(
     trainer: ImageClassificationTrainer,
     save_dir: str,
+    dataset_name: str,
     max_eval_steps: int,
     eval_mode: bool,
     is_main_process: bool,
@@ -726,14 +728,7 @@ def train(
                 )
                 val_metric = val_res.result_mean(trainer.target_metric).item()
 
-                should_save_epoch = trainer.epoch >= save_best_after and (
-                    best_metric is None
-                    or (
-                        val_metric <= best_metric
-                        if trainer.target_metric != "top1acc"
-                        else val_metric >= best_metric
-                    )
-                )
+                should_save_epoch = True
                 if should_save_epoch:
                     helpers.save_model_training(
                         model=trainer.model,
@@ -750,9 +745,7 @@ def train(
                     best_metric = val_metric
 
             # save checkpoints
-            should_save_epoch = (
-                is_main_process and save_epochs and trainer.epoch in save_epochs
-            )
+            should_save_epoch = True
             if should_save_epoch:
                 save_name = (
                     f"checkpoint-{trainer.epoch:04d}-{val_metric:.04f}"
@@ -762,6 +755,7 @@ def train(
                 helpers.save_model_training(
                     model=trainer.model,
                     optim=trainer.optim,
+                    dataset_name = dataset_name,
                     manager=trainer.manager,
                     checkpoint_manager=trainer.checkpoint_manager,
                     save_name=save_name,

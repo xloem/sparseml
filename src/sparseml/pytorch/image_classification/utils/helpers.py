@@ -52,6 +52,7 @@ from sparseml.pytorch.utils import (
 )
 from sparseml.utils import create_dirs
 from sparsezoo import Model, setup_model
+from sparseml.utils.datasets import cifar, imagenet, imagenette
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ __all__ = [
     "create_sparsezoo_model",
 ]
 
+AVAILABLE_DATASETS = ["cifar", "imagenet", "imagnette"]
 
 def create_sparsezoo_model(
     output_dir: str, training_outputs_dir: str, logs_path: Optional[str] = None
@@ -406,6 +408,7 @@ def get_arch_key(arch_key: Optional[str], checkpoint_path: Optional[str]) -> str
 def save_model_training(
     model: Module,
     optim: Optimizer,
+    dataset_name:str,
     manager: BaseManager,
     save_name: str,
     save_dir: str,
@@ -417,6 +420,7 @@ def save_model_training(
     """
     :param model: model architecture
     :param optim: the optimizer used
+    :param dataset_name: #TODO
     :param manager: manager created from the training recipe
     :param save_name: name to save model to
     :param save_dir: directory to save results in
@@ -456,9 +460,23 @@ def save_model_training(
 
     info_path = os.path.join(save_dir, f"{save_name}.txt")
     write_validation_results(info_path, val_res, epoch=epoch)
+    save_int_to_class_mapping(dataset_name, os.path.join(save_dir, os.path.join(save_dir, "config.json")))
 
     if not save_message_shown:
         print(f"Saving model for epoch {epoch} to {save_dir} for {save_name}")
+
+def save_int_to_class_mapping(dataset_name: str, save_dir: str):
+    if dataset_name not in AVAILABLE_DATASETS:
+        raise ValueError("")
+    elif dataset_name == "cifar":
+        int_to_class_mapping = cifar.CIFAR_10_CLASSES
+    elif dataset_name == "imagenette":
+        int_to_class_mapping = imagenette.IMAGENETTE_CLASSES
+    else:
+        int_to_class_mapping = imagenet.IMAGENET_CLASSES
+
+
+
 
 
 def write_validation_results(
