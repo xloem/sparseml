@@ -72,7 +72,6 @@ KEEP_QUANT_INPUT_OPS = [
     "QLinearAdd",
 ]
 
-
 def get_quantization_params(
     model: Union[ModelProto, ONNXGraph],
     node: NodeProto,
@@ -158,7 +157,9 @@ def _fold_conv_bn_bias(model: ModelProto, conv_node: NodeProto, bn_node: NodePro
         conv_bias_init = get_init_by_name(model, conv_node.input[2])
         if conv_bias_init is not None:
             conv_bias = numpy_helper.to_array(conv_bias_init)
-    conv_bias = conv_bias or numpy.zeros(bn_params.mean.shape)
+
+    if conv_bias is None:
+        conv_bias = numpy.zeros(bn_params.mean.shape)
 
     # fold bias into conv from bn then delete bn node
     variance_term = 1 / numpy.sqrt(bn_params.var + bn_params.epsilon)
@@ -200,6 +201,20 @@ def _fold_qat_conv_bns(model: ModelProto):
         swap_node_output(conv_node, div_node.output[0])
         # remove div from graph
         remove_node_and_params_from_graph(model, div_node)
+
+        # check if quantized node
+        for dequant_node in model.graph.node:
+            found_dequant_node = False
+            if dequant_node.op_type == "DequantizeLinear" and conv_node.input[1] in dequant_node.output:
+                found_dequant_node = True
+                break
+        if found_dequant_node:
+            # rename conv weight initializer to reflect original module name (extracted from bn node)
+            weight_name = bn_node.input[1].replace("bn.", "")
+            weight_name = weight_name.replace("module.", "")
+            weight_name = weight_name + ".unquantized"
+            conv_node.input[1] = weight_name
+            dequant_node.output[0] = weight_name
         # fold bn into conv bias and remove bn
         _fold_conv_bn_bias(model, conv_node, bn_node)
 
@@ -333,7 +348,8 @@ def _quantize_array(
 
     tensor = torch.Tensor(array).to(torch.float32)
     if isinstance(scale, numpy.ndarray):
-        scale = scale.item()
+        #scale = scale.item()
+        scale = (numpy.amax(array.flatten()) - numpy.amin(array.flatten()))/256.
     if isinstance(zero_point, numpy.ndarray):
         zero_point = zero_point.item()
 
@@ -367,7 +383,8 @@ def _convert_quantizable_conv(
         weight_quantize_params.zero_point,
         weight_quantize_params.zero_point.dtype,
     )
-    quantized_weight_name = "{}.weight_quantized".format(conv_node.name)
+
+    quantized_weight_name = conv_node.input[1].replace(".unquantized", "")
     quantized_weight_initializer = numpy_helper.from_array(
         quantized_weight, name=quantized_weight_name
     )
@@ -750,7 +767,10 @@ def _add_quantized_conv_matmul_add_ops(
     )
     if transpose_weight:
         quantized_weight = quantized_weight.transpose()
-    quantized_weight_name = "{}.weight_quantized".format(node.name)
+    if node.op_type == "Conv":
+        quantized_weight_name = node.input[1].replace(".unquantized", "")
+    else:
+        quantized_weight_name = "{}.weight_quantized".format(node.name)
     quantized_weight_initializer = numpy_helper.from_array(
         quantized_weight, name=quantized_weight_name
     )
@@ -1554,8 +1574,8 @@ def quantize_torch_qat_export(
     if not inplace:
         model = deepcopy(model)
 
-    _fold_qat_conv_bns(model)
     _convert_single_constants_to_initializers(model)
+    _fold_qat_conv_bns(model)
     _delete_repeated_qat_blocks(model)
     _quantize_qat_embedding(model)
     _propagate_mobilebert_embedding_quantization(model)
