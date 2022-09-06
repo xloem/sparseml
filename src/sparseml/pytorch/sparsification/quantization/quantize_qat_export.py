@@ -348,8 +348,7 @@ def _quantize_array(
 
     tensor = torch.Tensor(array).to(torch.float32)
     if isinstance(scale, numpy.ndarray):
-        #scale = scale.item()
-        scale = (numpy.amax(array.flatten()) - numpy.amin(array.flatten()))/256.
+        scale = scale.item()
     if isinstance(zero_point, numpy.ndarray):
         zero_point = zero_point.item()
 
