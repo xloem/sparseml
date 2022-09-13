@@ -128,8 +128,8 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
             end_epoch=end_epoch,
             end_comparator=-1,
         )
-        self._distill_output_keys = distill_output_keys
-        self._teacher_input_keys = teacher_input_keys
+        self.distill_output_keys = distill_output_keys
+        self.teacher_input_keys = teacher_input_keys
 
         self._teacher = None
         self._distillation_enabled = False
@@ -144,7 +144,7 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
         return [SparsificationTypes.distillation]
 
     @ModifierProp()
-    def distill_output_keys(self) -> Optional[List[Any]]:
+    def distill_output_keys(self) -> List[Any]:
         """
         :return: list of keys for the module outputs to use for
             distillation if multiple outputs are present. None or empty list defaults
@@ -153,7 +153,7 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
         return self._distill_output_keys
 
     @distill_output_keys.setter
-    def distill_output_keys(self, value: Optional[List[Any]]):
+    def distill_output_keys(self, value: List[Any]):
         """
         :params value: list of keys for the module outputs to use for
             distillation if multiple outputs are present. None or empty list defaults
@@ -162,7 +162,7 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
         self._distill_output_keys = value
 
     @ModifierProp()
-    def teacher_input_keys(self) -> Optional[List[Any]]:
+    def teacher_input_keys(self) -> List[Any]:
         """
         :return: list of keys to filter the inputs by before
             passing into the teacher. None or empty list defaults to using
@@ -171,7 +171,7 @@ class BaseDistillationModifier(ScheduledUpdateModifier):
         return self._teacher_input_keys
 
     @teacher_input_keys.setter
-    def teacher_input_keys(self, value: Optional[List[Any]]):
+    def teacher_input_keys(self, value: List[Any]):
         """
         :params value: list of keys to filter the inputs by before
             passing into the teacher. None or empty list defaults to using
