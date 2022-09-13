@@ -13,11 +13,7 @@
 # limitations under the License.
 
 """
-Modifier for performing knowledge distillation via feature immitation.
-Adapted from the paper "Knowledge Distillation for Object Detection
-via Rank Mimicking and Prediction-guided Feature Imitation"
-(https://arxiv.org/abs/2112.04840)
-
+Modifier for performing knowledge distillation via feature imitation.
 """
 
 import torch
