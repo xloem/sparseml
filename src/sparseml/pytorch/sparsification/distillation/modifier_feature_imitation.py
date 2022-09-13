@@ -23,7 +23,7 @@ via Rank Mimicking and Prediction-guided Feature Imitation"
 import torch
 from torch.nn import Module
 import logging
-from typing import Any, List
+from typing import Any, List, Optional
 
 from sparseml.optim import BaseModifier, ModifierProp
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
@@ -43,11 +43,13 @@ _LOGGER = logging.getLogger(__name__)
 @PyTorchModifierYAML()
 class FeatureImitationModifier(BaseDistillationModifier):
     """
-    Adds a knowledge distillation loss based on the prediction-guided feature
-    imitation loss. A distillation_teacher module may be provided as a kwarg to
+    Adds a knowledge distillation loss based on the feature imitation loss.
+    A distillation_teacher module may be provided as a kwarg to
     the Manager initialization and loss_update(loss) must be called before any
-    backwards pass in the integrated training flow. If no teacher model is
-    provided, then self distillation will be used.
+    backwards pass in the integrated training flow.
+    If no teacher model is provided, then self distillation will be used.
+    The feature difference between teacher and student can be weighted spattially
+    by a weighing function.
 
     | Sample yaml:
     |   !FeatureImitationModifier
@@ -85,13 +87,13 @@ class FeatureImitationModifier(BaseDistillationModifier):
         teacher_features: List[int],
         start_epoch: float = -1.0,
         end_epoch: float = -1.0,
-        distill_output_keys: List[Any] = None,
-        teacher_input_keys: List[Any] = None,
+        distill_output_keys: Optional[List[Any]] = None,
+        teacher_input_keys: Optional[List[Any]] = None,
         update_frequency: float = -1.0,
         gain: float = 1.5,
         output_format: str = "bayxo",
         feature_format: str = "boyx",
-        objectness_multiply: bool = False,
+        weight_function: Optional[str] = None,
     ):
         super().__init__(
             start_epoch=start_epoch,
@@ -106,7 +108,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self.gain = gain
         self.output_format = output_format
         self.feature_format = feature_format
-        self.objectness_multiply = objectness_multiply
+        self.weight_function = weight_function
         self._initialize_projection()
 
     @BaseModifier.sparsification_types.getter
@@ -270,9 +272,6 @@ class FeatureImitationModifier(BaseDistillationModifier):
                     bias=False
                 )
             )
-            #weights = torch.eye(self.student_features[layer], self.teacher_features[layer])
-            #weights = weights.view(self.student_features[layer], self.teacher_features[layer], 1, 1)
-            #projection[-1].weight.data.copy_(weights)
         self.projection = projection
 
     def _get_scores(self, outputs):
