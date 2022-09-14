@@ -35,8 +35,6 @@ __all__ = [
 ]
 
 _LOGGER = logging.getLogger(__name__)
-_WEIGHT_FUNCTIONS = {"prediction": _weight_prediction}
-
 
 @PyTorchModifierYAML()
 class FeatureImitationModifier(BaseDistillationModifier):
@@ -73,7 +71,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
     :param update_frequency:
     :param gain: How much to weight the distillation loss. Default is 1.5
     :param output_format: Format for output tensors following this convention:
-        ("b"=batch size, "a"=anchors, "x"=horizontal tiles, "y"=vertical tiles, "o"=outputs)
+        ("b"=batch size, "a"=anchors, "x"=horizontal tiles, "y"=vertical tiles,
+         "o"=outputs)
     :param feature_format: Format for feature tensors following this convention:
         ("b"=batch size, "x"=horizontal tiles, "y"=vertical tiles, "o"=outputs)
     :param weight_function: Optional string to identify function to weight the
@@ -192,8 +191,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
 
     @weight_function.setter
     def weight_function(self, value: str):
-        if value in _WEIGHT_FUNCTIONS:
-            self._weight_function = value
+        self._weight_function = value
 
     @ModifierProp(serializable=False)
     def output_class_dimension(self) -> int:
@@ -222,7 +220,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
     @ModifierProp(serializable=False)
     def compute_weight(self) -> Callable:
         weight_methods = {"prediction": self._weight_prediction}
-        return weight_methods.get(self.weight_function, None)
+        if self.weight_function in weight_methods:
+            return weight_methods.get(self.weight_function, None)
 
     @compute_weight.setter
     def compute_weight(self, value: Callable):
