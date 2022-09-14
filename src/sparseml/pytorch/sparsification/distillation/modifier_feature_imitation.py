@@ -16,10 +16,11 @@
 Modifier for performing knowledge distillation via feature imitation.
 """
 
+import logging
+from typing import Any, Callable, List, Optional
+
 import torch
 from torch.nn import Module
-import logging
-from typing import Any, List, Optional, Callable
 
 from sparseml.optim import BaseModifier, ModifierProp
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
@@ -35,6 +36,7 @@ __all__ = [
 
 _LOGGER = logging.getLogger(__name__)
 _WEIGHT_FUNCTIONS = {"prediction": _weight_prediction}
+
 
 @PyTorchModifierYAML()
 class FeatureImitationModifier(BaseDistillationModifier):
@@ -115,7 +117,10 @@ class FeatureImitationModifier(BaseDistillationModifier):
         """
         :return: the sparsification types this modifier instance will apply
         """
-        return [SparsificationTypes.feature_distillation, SparsificationTypes.distillation]
+        return [
+            SparsificationTypes.feature_distillation,
+            SparsificationTypes.distillation,
+        ]
 
     @ModifierProp()
     def number_of_classes(self) -> int:
@@ -216,9 +221,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
 
     @ModifierProp(serializable=False)
     def compute_weight(self) -> Callable:
-        weight_methods = {
-            "prediction": self._weight_prediction
-        }
+        weight_methods = {"prediction": self._weight_prediction}
         return weight_methods.get(self.weight_function, None)
 
     @compute_weight.setter
@@ -235,7 +238,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
             student_projected_features = self.projection[layer](student_features)
 
             feature_difference = torch.mean(
-                (student_projected_features - teacher_features)**2,
+                (student_projected_features - teacher_features) ** 2,
                 dim=self.feature_dimension,
             )
 
@@ -260,22 +263,22 @@ class FeatureImitationModifier(BaseDistillationModifier):
                     in_channels=self.student_features[layer],
                     out_channels=self.teacher_features[layer],
                     kernel_size=1,
-                    bias=False
+                    bias=False,
                 )
             )
         self.projection = projection
 
     def _set_compute_weight(self):
-        weight_methods = {
-            "prediction": self._weight_prediction
-        }
+        weight_methods = {"prediction": self._weight_prediction}
         if self.weight_function is None:
             self.compute_weight = None
         else:
             self.compute_weight = weight_methods[self.weight_function]
 
     def _get_scores(self, outputs):
-        _, scores = torch.split(outputs, (5, self.number_of_classes), dim=self.output_class_dimension)
+        _, scores = torch.split(
+            outputs, (5, self.number_of_classes), dim=self.output_class_dimension
+        )
         return torch.sigmoid(scores)
 
     def _weight_prediction(self, layer, student_outputs, teacher_outputs):
@@ -290,8 +293,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
         teacher_class_scores = self._get_scores(teacher_outputs["output"][layer])
 
         weight = torch.mean(
-            (student_class_scores - teacher_class_scores)**2,
-            dim=(self.output_anchor_dimension, self.output_class_dimension)
+            (student_class_scores - teacher_class_scores) ** 2,
+            dim=(self.output_anchor_dimension, self.output_class_dimension),
         )
 
         return weight
