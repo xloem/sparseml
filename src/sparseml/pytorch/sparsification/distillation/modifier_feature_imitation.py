@@ -219,7 +219,9 @@ class FeatureImitationModifier(BaseDistillationModifier):
 
     @ModifierProp(serializable=False)
     def compute_weight(self) -> Callable:
-        weight_methods = {"prediction": self._weight_prediction}
+        weight_methods = {
+            "prediction": self._weight_prediction,
+        }
         if self.weight_function in weight_methods:
             return weight_methods.get(self.weight_function, None)
 
