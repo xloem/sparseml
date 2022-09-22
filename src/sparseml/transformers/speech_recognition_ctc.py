@@ -583,20 +583,18 @@ def main():
     # create model and teacher
     model, teacher = SparseAutoModel.speech_recognition_ctc_from_pretrained_distil(
         model_name_or_path=(
-            model_args.tokenizer_name
-            if model_args.tokenizer_name
-            else model_args.model_name_or_path
+            model_args.model_name_or_path
         ),
         model_kwargs={
             "config": config,
             "cache_dir": model_args.cache_dir,
-            "revision": model_args.model_revision,
-            "use_auth_token": True if model_args.use_auth_token else None,
+            # "revision": model_args.model_revision,
+            # "use_auth_token": True if model_args.use_auth_token else None,
         },
         teacher_name_or_path=training_args.distill_teacher,
         teacher_kwargs={
             "cache_dir": model_args.cache_dir,
-            "use_auth_token": True if model_args.use_auth_token else None,
+            # "use_auth_token": True if model_args.use_auth_token else None,
         },
     )
 
