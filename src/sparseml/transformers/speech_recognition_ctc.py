@@ -581,7 +581,7 @@ def main():
     )
 
     # create model and teacher
-    model, teacher = SparseAutoModel.text_classification_from_pretrained_distil(
+    model, teacher = SparseAutoModel.speech_recognition_ctc_from_pretrained_distil(
         model_name_or_path=(
             model_args.tokenizer_name
             if model_args.tokenizer_name

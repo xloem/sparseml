@@ -123,6 +123,13 @@ def load_task_model(task: str, model_path: str, config: Any) -> Module:
             model_type="model",
         )
 
+    if task == "speech-recognition-ctc":
+        return SparseAutoModel.speech_recognition_ctc_from_pretrained(
+            model_name_or_path=model_path,
+            config=config,
+            model_type="model",
+        )
+
     raise ValueError(f"unrecognized task given of {task}")
 
 
