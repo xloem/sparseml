@@ -573,7 +573,7 @@ def _convert_quantizable_matmul(model: ModelProto):
     |                     |
     |               QuantizeLinear
     |                     |
-    |              DequantizeLinear
+    |              DequantizeLinear (optional)
     |                     |
     |                  OUTPUT
     | We end up converting to:
@@ -588,7 +588,7 @@ def _convert_quantizable_matmul(model: ModelProto):
     |                     |
     |                    Reshape (optional)
     |                     |
-    |              DequantizeLinear
+    |              DequantizeLinear (optional)
     |                     |
     |                  OUTPUT
     """
@@ -665,9 +665,9 @@ def _convert_quantizable_matmul(model: ModelProto):
             continue
 
         # Make sure the output node's child is DequantizeLinear
-        child = graph.get_node_single_child(output_quantize_node)
-        if child is None or child.op_type != "DequantizeLinear":
-            continue
+        #child = graph.get_node_single_child(output_quantize_node)
+        #if child is None or child.op_type != "DequantizeLinear":
+        #    continue
 
         _LOGGER.debug(f"Matched quantizable MatMul: {matmul_node.name}")
 
@@ -1882,11 +1882,21 @@ def _propagate_whisper_quantization(model: ModelProto):
         transpose_node = graph.get_node_single_child(matmul_node)
         if not transpose_node or transpose_node.op_type != "Transpose":
             continue
-
-        shape_node = graph.get_node_single_child(transpose_node)
-        if not shape_node or shape_node.op_type != "Shape":
+        print(matmul_node.name, transpose_node.name)
+        transpose_children = graph.get_node_children(transpose_node)
+        if transpose_children:
+            found_shape_node = False
+            for child in transpose_children:
+                if child.op_type == "Shape":
+                    shape_node = child
+                    found_shape_node = True
+                    break
+            if not found_shape_node:
+                continue
+        else:
             continue
 
+        print(matmul_node.name, transpose_node.name, shape_node.name)
         slice_node = graph.get_node_single_child(shape_node)
         if not slice_node or slice_node.op_type != "Slice":
             continue
@@ -1904,7 +1914,7 @@ def _propagate_whisper_quantization(model: ModelProto):
             continue
 
         matmul_node.output[0] = quantize_node.input[0]
-        reshape_node.output[0] = quantize_node.outpt[0]
+        reshape_node.output[0] = quantize_node.output[0]
         quantize_node.output[0] = transpose_node.input[0]
 
         graph.update()
