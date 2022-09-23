@@ -333,7 +333,8 @@ def _quantize_array(
 
     tensor = torch.Tensor(array).to(torch.float32)
     if isinstance(scale, numpy.ndarray):
-        scale = scale.item()
+        #scale = scale.item()
+        scale = (numpy.amax(array.flatten()) - numpy.amin(array.flatten()))/256.
     if isinstance(zero_point, numpy.ndarray):
         zero_point = zero_point.item()
 
@@ -803,7 +804,12 @@ def _add_quantized_conv_matmul_add_ops(
         )
         if node.op_type == "Conv" and len(quantized_bias.shape) == 1:
             # reshape for bias add broadcasting
-            quantized_bias = quantized_bias.reshape(1, quantized_bias.shape[0], 1, 1)
+            if quantized_weight.ndim == 3:
+                # 1d convolution
+                quantized_bias = quantized_bias.reshape(1, quantized_bias.shape[0], 1)
+            else:
+                # 2d convolution
+                quantized_bias = quantized_bias.reshape(1, quantized_bias.shape[0], 1, 1)
 
         quantized_bias_name = "{}.bias_quantized".format(bias_add_name)
         quantized_bias_initializer = numpy_helper.from_array(
@@ -1940,6 +1946,7 @@ def _fix_conv1d(model: ModelProto):
             continue
 
         scale = (numpy.amax(conv_weight.flatten()) - numpy.amin(conv_weight.flatten()))/256.
+        scale = scale.astype(numpy.float32)
         zero_point = numpy.array(0).astype(numpy.int8)
         scale_initializer = numpy_helper.from_array(scale, "{}.scale".format(conv_node.input[1]))
         zero_point_initializer = numpy_helper.from_array(zero_point, "{}.zero_point".format(conv_node.input[1]))
