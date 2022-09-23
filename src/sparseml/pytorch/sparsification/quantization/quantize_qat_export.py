@@ -1561,6 +1561,7 @@ def quantize_torch_qat_export(
     if not inplace:
         model = deepcopy(model)
 
+    _fix_conv1d(model)
     _fold_qat_conv_bns(model)
     _convert_single_constants_to_initializers(model)
     _delete_repeated_qat_blocks(model)
@@ -1882,7 +1883,6 @@ def _propagate_whisper_quantization(model: ModelProto):
         transpose_node = graph.get_node_single_child(matmul_node)
         if not transpose_node or transpose_node.op_type != "Transpose":
             continue
-        print(matmul_node.name, transpose_node.name)
         transpose_children = graph.get_node_children(transpose_node)
         if transpose_children:
             found_shape_node = False
@@ -1896,7 +1896,6 @@ def _propagate_whisper_quantization(model: ModelProto):
         else:
             continue
 
-        print(matmul_node.name, transpose_node.name, shape_node.name)
         slice_node = graph.get_node_single_child(shape_node)
         if not slice_node or slice_node.op_type != "Slice":
             continue
@@ -1925,3 +1924,42 @@ def _propagate_whisper_quantization(model: ModelProto):
         _LOGGER.info(
             f"Propagated {converted_nodes} QuantizeLinear node(s) through trivial nodes"
         )
+
+def _fix_conv1d(model: ModelProto):
+    conv_nodes = [n for n in model.graph.node if n.op_type in ["Conv"]]
+    graph = ONNXGraph(model)
+    nodes_to_add = []
+    for conv_node in conv_nodes:
+        conv_weight_init = get_init_by_name(model, conv_node.input[1])
+        if conv_weight_init is None:
+            continue
+
+        conv_weight = numpy_helper.to_array(conv_weight_init)
+        is_conv_1d = conv_weight.ndim == 3
+        if not is_conv_1d:
+            continue
+
+        scale = (numpy.amax(conv_weight.flatten()) - numpy.amin(conv_weight.flatten()))/256.
+        zero_point = numpy.array(0).astype(numpy.int8)
+        scale_initializer = numpy_helper.from_array(scale, "{}.scale".format(conv_node.input[1]))
+        zero_point_initializer = numpy_helper.from_array(zero_point, "{}.zero_point".format(conv_node.input[1]))
+        quant_node_output = "{}.quant".format(conv_node.input[1])
+        quant_node = onnx.helper.make_node(
+            name="{}.weight.quant".format(conv_node.name),
+            op_type="QuantizeLinear",
+            inputs=[conv_node.input[1], scale_initializer.name, zero_point_initializer.name],
+            outputs=[quant_node_output],
+            )
+
+        dequant_node_output = "{}.dequant".format(conv_node.input[1])
+        dequant_node = onnx.helper.make_node(
+            name="{}.weight.dequant".format(conv_node.name),
+            op_type="DequantizeLinear",
+            inputs=[quant_node_output, scale_initializer.name, zero_point_initializer.name],
+            outputs=[dequant_node_output],
+        )
+        conv_node.input[1] = dequant_node_output
+        nodes_to_add.extend([quant_node, dequant_node])
+        model.graph.initializer.extend([scale_initializer, zero_point_initializer])
+
+    model.graph.node.extend(nodes_to_add)
