@@ -1566,6 +1566,7 @@ def quantize_torch_qat_export(
     _delete_repeated_qat_blocks(model)
     _quantize_qat_embedding(model)
     _propagate_mobilebert_embedding_quantization(model)
+    _propagate_whisper_quantization(model)
     _convert_quantizable_matmul(model)
     _convert_quantizable_matmul_and_add(model)
     _fold_relu_quants(model)
@@ -1829,4 +1830,88 @@ def _propagate_mobilebert_embedding_quantization(model: ModelProto):
     if converted_nodes > 0:
         _LOGGER.info(
             f"Propagated {converted_nodes} DequantizeLinear node(s) through Concat"
+        )
+
+
+def _propagate_whisper_quantization(model: ModelProto):
+    """
+    A pass for propagating quantize linear node through trivial nodes
+
+    Starting with:
+    |           INPUT
+    |            |
+    |          MatMul
+    |            |
+    |        Transpose
+    |            |
+    |          Shape
+    |            |
+    |          Slice
+    |            |
+    |          Concat
+    |            |
+    |          Reshape
+    |            |
+    |        QuantizeLinear
+    |            |
+    |          OUTPUT
+
+    Converts to:
+    |           INPUT
+    |            |
+    |          MatMul
+    |            |
+    |        QuantizeLinear
+    |            |
+    |        Transpose
+    |            |
+    |          Shape
+    |            |
+    |          Slice
+    |            |
+    |          Concat
+    |            |
+    |          Reshape
+    |            |
+    |          OUTPUT
+    """
+    converted_nodes = 0
+    matmul_nodes = [n for n in model.graph.node if n.op_type in ["MatMul"]]
+    graph = ONNXGraph(model)
+    for matmul_node in matmul_nodes:
+        transpose_node = graph.get_node_single_child(matmul_node)
+        if not transpose_node or transpose_node.op_type != "Transpose":
+            continue
+
+        shape_node = graph.get_node_single_child(transpose_node)
+        if not shape_node or shape_node.op_type != "Shape":
+            continue
+
+        slice_node = graph.get_node_single_child(shape_node)
+        if not slice_node or slice_node.op_type != "Slice":
+            continue
+
+        concat_node = graph.get_node_single_child(slice_node)
+        if not concat_node or concat_node.op_type != "Concat":
+            continue
+
+        reshape_node = graph.get_node_single_child(concat_node)
+        if not reshape_node or reshape_node.op_type != "Reshape":
+            continue
+
+        quantize_node = graph.get_node_single_child(reshape_node)
+        if not quantize_node or quantize_node.op_type != "QuantizeLinear":
+            continue
+
+        matmul_node.output[0] = quantize_node.input[0]
+        reshape_node.output[0] = quantize_node.outpt[0]
+        quantize_node.output[0] = transpose_node.input[0]
+
+        graph.update()
+
+        converted_nodes += 1
+
+    if converted_nodes > 0:
+        _LOGGER.info(
+            f"Propagated {converted_nodes} QuantizeLinear node(s) through trivial nodes"
         )
