@@ -167,7 +167,8 @@ def _fold_conv_bn_bias(model: ModelProto, conv_node: NodeProto, bn_node: NodePro
     folded_bias = normalized_bias * bn_params.scale + bn_params.bias
     folded_bias = folded_bias.astype(numpy.float32)
 
-    bias_name = conv_node.name + ".bias"
+    bias_name = bn_node.input[2].replace("bn.", "")
+    bias_name = bias_name.replace("module.", "")
     if len(conv_node.input) > 2:
         conv_node.input[2] = bias_name
     else:
@@ -203,18 +204,21 @@ def _fold_qat_conv_bns(model: ModelProto):
         remove_node_and_params_from_graph(model, div_node)
 
         # check if quantized node
-        for dequant_node in model.graph.node:
-            found_dequant_node = False
-            if dequant_node.op_type == "DequantizeLinear" and conv_node.input[1] in dequant_node.output:
-                found_dequant_node = True
-                break
-        if found_dequant_node:
+        dequant_node = graph.get_node_single_parent(conv_node, 1)
+        if dequant_node.op_type == "DequantizeLinear":
             # rename conv weight initializer to reflect original module name (extracted from bn node)
-            weight_name = bn_node.input[1].replace("bn.", "")
-            weight_name = weight_name.replace("module.", "")
-            weight_name = weight_name + ".unquantized"
-            conv_node.input[1] = weight_name
-            dequant_node.output[0] = weight_name
+            quant_node = graph.get_node_single_parent(dequant_node, 0)
+            if quant_node.op_type == "QuantizeLinear":
+                weight_name = bn_node.input[1].replace("bn.", "")
+                weight_name = weight_name.replace("module.", "")
+                weight_initializer = graph.get_init_by_name(quant_node.input[0])
+                new_weight_initializer = numpy_helper.from_array(
+                    numpy_helper.to_array(weight_initializer), name=weight_name
+                )
+                quant_node.input[0] = weight_name
+                model.graph.initializer.remove(weight_initializer)
+                model.graph.initializer.append(new_weight_initializer)
+
         # fold bn into conv bias and remove bn
         _fold_conv_bn_bias(model, conv_node, bn_node)
 
@@ -383,7 +387,7 @@ def _convert_quantizable_conv(
         weight_quantize_params.zero_point.dtype,
     )
 
-    quantized_weight_name = conv_node.input[1].replace(".unquantized", "")
+    quantized_weight_name = conv_node.input[1]
     quantized_weight_initializer = numpy_helper.from_array(
         quantized_weight, name=quantized_weight_name
     )
@@ -745,7 +749,6 @@ def _add_quantized_conv_matmul_add_ops(
     input_quantize_params: QuantizationParams,
     weight_quantize_params: QuantizationParams,
     bias_initializer: onnx.TensorProto,
-    bias_add_name: str,
     target_output: str,
     transpose_weight: bool,
     output_quantize_node: Optional[NodeProto] = None,
@@ -766,10 +769,8 @@ def _add_quantized_conv_matmul_add_ops(
     )
     if transpose_weight:
         quantized_weight = quantized_weight.transpose()
-    if node.op_type == "Conv":
-        quantized_weight_name = node.input[1].replace(".unquantized", "")
-    else:
-        quantized_weight_name = "{}.weight_quantized".format(node.name)
+
+    quantized_weight_name = "{:}.quantized".format(weight_quantize_node.input[0])
     quantized_weight_initializer = numpy_helper.from_array(
         quantized_weight, name=quantized_weight_name
     )
@@ -784,7 +785,7 @@ def _add_quantized_conv_matmul_add_ops(
         weight_quantize_node.input[2],  # weight zero point
     ]
     integer_op_output = "{}_quant".format(node.output[0])
-    integer_op_name = "{}_quant".format(node.name)
+    integer_op_name = quantized_weight_name.replace(".weight", "")
 
     # create MatMulInteger/ConvInteger node and add it to graph
     if node.op_type == "Conv":
@@ -812,21 +813,21 @@ def _add_quantized_conv_matmul_add_ops(
 
     # Add bias + zero point correction
     # quantize bias
-    bias_initializer = numpy_helper.to_array(bias_initializer)
     bias_scale = input_quantize_params.scale * weight_quantize_params.scale
     bias_zero_point = 0
     quantized_bias = _quantize_array(
-        bias_initializer, bias_scale, bias_zero_point, dtype=numpy.int32
+        numpy_helper.to_array(bias_initializer), bias_scale, bias_zero_point, dtype=numpy.int32
     )
     if node.op_type == "Conv" and len(quantized_bias.shape) == 1:
         # reshape for bias add broadcasting
         quantized_bias = quantized_bias.reshape(1, quantized_bias.shape[0], 1, 1)
 
-    quantized_bias_name = "{}.bias_quantized".format(bias_add_name)
+    quantized_bias_name = "{:}.quantized".format(bias_initializer.name)
     quantized_bias_initializer = numpy_helper.from_array(
         quantized_bias, name=quantized_bias_name
     )
     model.graph.initializer.append(quantized_bias_initializer)
+
     quantized_bias_scale_name = "{}.scale".format(quantized_bias_name)
     model.graph.initializer.append(
         numpy_helper.from_array(
@@ -984,7 +985,6 @@ def _convert_quantizable_gemm_no_activations(model: ModelProto):
             input_quantize_params=input_quantize_params,
             weight_quantize_params=weight_quantize_params,
             bias_initializer=bias_initializer,
-            bias_add_name="{}_bias_add".format(gemm_node.name),
             target_output=gemm_node.output[0],
             transpose_weight=transpose_weight,
         )
@@ -1113,7 +1113,6 @@ def _convert_quantizable_matmul_and_add(model: ModelProto):
             input_quantize_params=input_quantize_params,
             weight_quantize_params=weight_quantize_params,
             bias_initializer=bias_initializer,
-            bias_add_name=bias_add_node.name,
             target_output=(
                 output_dequantize_node.output[0]
                 if output_dequantize_node
@@ -1246,7 +1245,6 @@ def _convert_quantizable_conv_integer(model: ModelProto):
             input_quantize_params=input_quantize_params,
             weight_quantize_params=weight_quantize_params,
             bias_initializer=bias_initializer,
-            bias_add_name="{}_bias_add".format(conv_node.name),
             target_output=conv_node.output[0],
             transpose_weight=False,
         )
