@@ -322,6 +322,18 @@ class BaseManager(BaseObject):
         ]
 
     @ModifierProp(serializable=False)
+    def per_layer_distillation_modifiers(self) -> List[BaseModifier]:
+        """
+        :return: list of all SparseML modifiers in the managed recipe that manage
+            Distillation
+        """
+        return [
+            mod
+            for mod in self.iter_modifiers()
+            if SparsificationTypes.per_layer_distillation_modifiers in mod.sparsification_types
+        ]
+
+    @ModifierProp(serializable=False)
     def structured_modifiers(self) -> List[BaseModifier]:
         """
         :return: list of all SparseML modifiers in the managed recipe that manage
