@@ -17,10 +17,9 @@ Modifier for performing knowledge distillation via feature imitation.
 """
 
 import logging
-from typing import Any, Callable, List, Optional
+from typing import Any, List, Optional
 
 import torch
-from torch.nn import Module
 
 from sparseml.optim import BaseModifier, ModifierProp
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
@@ -35,6 +34,7 @@ __all__ = [
 ]
 
 _LOGGER = logging.getLogger(__name__)
+
 
 @PyTorchModifierYAML()
 class PerLayerDistillationModifier(BaseDistillationModifier):
@@ -122,17 +122,18 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         """
         return self._normalize
 
-    @gain.setter
-    def normalize(self, value: float):
+    @normalize.setter
+    def normalize(self, value: bool):
         """
-        :params value: whether to normalize distillation loss by magnitude of teacher output
+        :params value: whether to normalize distillation loss
+            by magnitude of teacher output
         """
         self._normalize = value
 
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
         distillation_loss = 0.0
         common_modules = set(student_outputs.keys()) & set(teacher_outputs.keys())
-        common_modules.remove('output')
+        common_modules.remove("output")
 
         for module in common_modules:
             student_module_output = student_outputs[module]
@@ -152,4 +153,3 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
 
     def compute_total_loss(self, loss, distillation_loss):
         return loss + self.gain * distillation_loss
-
