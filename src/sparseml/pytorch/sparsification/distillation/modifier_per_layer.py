@@ -17,11 +17,12 @@ Modifier for performing knowledge distillation via feature imitation.
 """
 
 import logging
-from typing import Any, List, Optional
-
+from typing import Any, List, Optional, Union
 import torch
+from torch.nn import Module
 
 from sparseml.optim import BaseModifier, ModifierProp
+from sparseml.pytorch.utils import BaseLogger
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
     BaseDistillationModifier,
 )
@@ -88,6 +89,10 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         )
         self.gain = gain
         self.normalize = normalize
+        self.cached_student_output = None
+        self.cached_teacher_output = None
+        self.student_handles = None
+        self.teacher_handles = None
 
     @BaseModifier.sparsification_types.getter
     def sparsification_types(self) -> List[SparsificationTypes]:
@@ -130,14 +135,103 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         """
         self._normalize = value
 
-    def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
-        distillation_loss = 0.0
-        common_modules = set(student_outputs.keys()) & set(teacher_outputs.keys())
-        common_modules.remove("output")
+    def initialize(
+        self,
+        module: Module,
+        epoch: float = 0,
+        loggers: Optional[List[BaseLogger]] = None,
+        distillation_teacher: Union[Module, str] = "disable",
+        **kwargs,
+    ):
+        """
+        Store the teacher model for distillation if provided
 
-        for module in common_modules:
-            student_module_output = student_outputs[module]
-            teacher_module_output = teacher_outputs[module]
+        :param module: the PyTorch model/module to modify
+        :param epoch: The epoch to initialize the modifier and module at.
+            Defaults to 0 (start of the training process)
+        :param loggers: Optional list of loggers to log the modification process to
+        :param distillation_teacher: teacher module to perform knowledge distillation
+            with. If not provided, self distillation will be used with a teacher
+             from a copy of the given module at the start epoch. If given string
+             "disable" this modifier will not apply distillation of any kind,
+             even in the active epoch range
+        :param kwargs: Optional kwargs to support specific arguments
+            for individual modifiers.
+        """
+        super().initialize(module, epoch, loggers, distillation_teacher, **kwargs)
+
+        if isinstance(distillation_teacher, Module):
+            self.cached_student_output = {}
+            self.cached_teacher_output = {}
+
+            def cache_output(name, outputs):
+                def forward_hook_fn(layer, inp, out):
+                    outputs[name] = out
+
+                return forward_hook_fn
+
+            def find_layers(layer_module, cached_layers, name=''):
+                if isinstance(layer_module, torch.nn.Conv2d) or isinstance(layer_module, torch.nn.Linear):
+                    cached_layers[name] = layer_module
+                for layer_module, child in layer_module.named_children():
+                    find_layers(child, cached_layers, name + '.' + layer_module if name != '' else layer_module)
+
+            cached_student_layers = {}
+            cached_teacher_layers = {}
+            find_layers(module, cached_student_layers)
+            find_layers(distillation_teacher, cached_teacher_layers)
+            cached_student_layers_ = {}
+            cached_teacher_layers_ = {}
+            for layer_name in cached_student_layers:
+                if layer_name in cached_teacher_layers:
+                    cached_student_layers_ = cached_student_layers[layer_name]
+                    cached_teacher_layers_ = cached_student_layers[layer_name]
+            cached_student_layers = cached_student_layers_
+            cached_teacher_layers = cached_teacher_layers_
+
+            self.student_handles = []
+            self.teacher_handles = []
+            for layer_name in cached_student_layers:
+                self.student_handles.append(cached_student_layers[layer_name].register_forward_hook(cache_output(layer_name, self.cached_student_output)))
+                self.teacher_handles.append(cached_teacher_layers[layer_name].register_forward_hook(cache_output(layer_name, self.cached_teacher_output)))
+            self._teacher = distillation_teacher
+        else:
+            raise ValueError(
+                "unrecognized value for distillation_modifier given of "
+                f"{distillation_teacher}. "
+                "To disable set to 'disable' and for self attention set to 'self'"
+            )
+
+    def finalize(
+        self, module: Optional[Module] = None, reset_loggers: bool = True, **kwargs
+    ):
+        """
+        Cleans up any state and hooks
+
+        :param module: The model/module to finalize the modifier for.
+            Marked optional so state can still be cleaned up on delete,
+            but generally should always be passed in.
+        :param reset_loggers: True to remove any currently attached loggers (default),
+            False to keep the loggers attached.
+        :param kwargs: Optional kwargs to support specific arguments
+            for individual modifiers.
+        """
+        super().finalize(module, reset_loggers, **kwargs)
+        for handle in self.student_handles:
+            handle.remove()
+        for handle in self.teacher_handles:
+            handle.remove()
+        self.student_handles = None
+        self.teacher_handles = None
+        self.cached_student_output = None
+        self.cached_teacher_output = None
+
+    def compute_distillation_loss(self, **kwargs):
+        distillation_loss = 0.0
+
+        for layer_name in self.cached_student_output:
+            student_module_output = self.cached_student_output[layer_name]
+            teacher_module_output = self.cached_teacher_output[layer_name]
 
             output_difference = torch.mean(
                 (student_module_output - teacher_module_output) ** 2,
