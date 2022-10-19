@@ -330,7 +330,8 @@ class BaseManager(BaseObject):
         return [
             mod
             for mod in self.iter_modifiers()
-            if SparsificationTypes.per_layer_distillation_modifiers in mod.sparsification_types
+            if SparsificationTypes.per_layer_distillation_modifiers
+            in mod.sparsification_types
         ]
 
     @ModifierProp(serializable=False)
