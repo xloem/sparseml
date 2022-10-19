@@ -94,16 +94,6 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         self.student_handles = None
         self.teacher_handles = None
 
-    @BaseModifier.sparsification_types.getter
-    def sparsification_types(self) -> List[SparsificationTypes]:
-        """
-        :return: the sparsification types this modifier instance will apply
-        """
-        return [
-            SparsificationTypes.per_layer_distillation,
-            SparsificationTypes.distillation,
-        ]
-
     @ModifierProp()
     def gain(self) -> float:
         """
