@@ -18,16 +18,16 @@ Modifier for performing knowledge distillation via feature imitation.
 
 import logging
 from typing import Any, List, Optional, Union
+
 import torch
 from torch.nn import Module
 
-from sparseml.optim import BaseModifier, ModifierProp
-from sparseml.pytorch.utils import BaseLogger
+from sparseml.optim import ModifierProp
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
     BaseDistillationModifier,
 )
 from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
-from sparseml.sparsification import SparsificationTypes
+from sparseml.pytorch.utils import BaseLogger
 
 
 __all__ = [
@@ -160,11 +160,17 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
 
                 return forward_hook_fn
 
-            def find_layers(layer_module, cached_layers, name=''):
-                if isinstance(layer_module, torch.nn.Conv2d) or isinstance(layer_module, torch.nn.Linear):
+            def find_layers(layer_module, cached_layers, name=""):
+                if isinstance(layer_module, torch.nn.Conv2d) or isinstance(
+                    layer_module, torch.nn.Linear
+                ):
                     cached_layers[name] = layer_module
                 for layer_module, child in layer_module.named_children():
-                    find_layers(child, cached_layers, name + '.' + layer_module if name != '' else layer_module)
+                    find_layers(
+                        child,
+                        cached_layers,
+                        name + "." + layer_module if name != "" else layer_module,
+                    )
 
             cached_student_layers = {}
             cached_teacher_layers = {}
@@ -174,16 +180,28 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
             cached_teacher_layers_ = {}
             for layer_name in cached_student_layers:
                 if layer_name in cached_teacher_layers:
-                    cached_student_layers_ = cached_student_layers[layer_name]
-                    cached_teacher_layers_ = cached_student_layers[layer_name]
+                    cached_student_layers_[layer_name] = cached_student_layers[
+                        layer_name
+                    ]
+                    cached_teacher_layers_[layer_name] = cached_student_layers[
+                        layer_name
+                    ]
             cached_student_layers = cached_student_layers_
             cached_teacher_layers = cached_teacher_layers_
 
             self.student_handles = []
             self.teacher_handles = []
             for layer_name in cached_student_layers:
-                self.student_handles.append(cached_student_layers[layer_name].register_forward_hook(cache_output(layer_name, self.cached_student_output)))
-                self.teacher_handles.append(cached_teacher_layers[layer_name].register_forward_hook(cache_output(layer_name, self.cached_teacher_output)))
+                self.student_handles.append(
+                    cached_student_layers[layer_name].register_forward_hook(
+                        cache_output(layer_name, self.cached_student_output)
+                    )
+                )
+                self.teacher_handles.append(
+                    cached_teacher_layers[layer_name].register_forward_hook(
+                        cache_output(layer_name, self.cached_teacher_output)
+                    )
+                )
             self._teacher = distillation_teacher
         else:
             raise ValueError(
