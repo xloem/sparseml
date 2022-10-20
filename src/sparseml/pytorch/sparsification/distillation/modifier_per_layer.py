@@ -17,7 +17,7 @@ Modifier for performing knowledge distillation via feature imitation.
 """
 
 import logging
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Union, Mapping
 
 import torch
 from torch.nn import Module
@@ -89,10 +89,10 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         )
         self.gain = gain
         self.normalize = normalize
-        self.cached_student_output = None
-        self.cached_teacher_output = None
-        self.student_handles = None
-        self.teacher_handles = None
+        self._cached_student_output = None
+        self._cached_teacher_output = None
+        self._student_handles = None
+        self._teacher_handles = None
 
     @ModifierProp()
     def gain(self) -> float:
@@ -125,6 +125,31 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         """
         self._normalize = value
 
+    @ModifierProp(serializable=False)
+    def cached_student_output(self) -> Mapping:
+        return self._cached_student_output
+
+    @cached_student_output.setter
+    def cached_student_output(self, value: Mapping):
+        self._cached_student_output = value
+
+    @ModifierProp(serializable=False)
+    def cached_teacher_output(self) -> Mapping:
+        return self._cached_teacher_output
+
+    @cached_teacher_output.setter
+    def cached_teacher_output(self, value: Mapping):
+        self._cached_teacher_output = value
+
+    @ModifierProp(serializable=False)
+    def cached_teacher_output(self) -> Mapping:
+        return self._cached_teacher_output
+
+    @cached_teacher_output.setter
+    def cached_teacher_output(self, value: Mapping):
+        self._cached_teacher_output = value
+
+
     def initialize(
         self,
         module: Module,
@@ -151,13 +176,12 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         super().initialize(module, epoch, loggers, distillation_teacher, **kwargs)
 
         if isinstance(distillation_teacher, Module):
-            self.cached_student_output = {}
-            self.cached_teacher_output = {}
+            self._cached_student_output = {}
+            self._cached_teacher_output = {}
 
-            def cache_output(name, outputs):
+            def cache_output(layer_name, outputs):
                 def forward_hook_fn(layer, inp, out):
-                    outputs[name] = out
-
+                    outputs[layer_name] = out
                 return forward_hook_fn
 
             def find_layers(layer_module, cached_layers, name=""):
@@ -180,26 +204,23 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
             cached_teacher_layers_ = {}
             for layer_name in cached_student_layers:
                 if layer_name in cached_teacher_layers:
-                    cached_student_layers_[layer_name] = cached_student_layers[
-                        layer_name
-                    ]
-                    cached_teacher_layers_[layer_name] = cached_student_layers[
-                        layer_name
-                    ]
+                    cached_student_layers_[layer_name] = cached_student_layers[layer_name]
+                    cached_teacher_layers_[layer_name] = cached_teacher_layers[layer_name]
             cached_student_layers = cached_student_layers_
             cached_teacher_layers = cached_teacher_layers_
 
-            self.student_handles = []
-            self.teacher_handles = []
+            self._student_handles = []
+            self._teacher_handles = []
             for layer_name in cached_student_layers:
-                self.student_handles.append(
+                self._student_handles.append(
                     cached_student_layers[layer_name].register_forward_hook(
-                        cache_output(layer_name, self.cached_student_output)
+                        cache_output(layer_name, self._cached_student_output)
                     )
                 )
-                self.teacher_handles.append(
+
+                self._student_handles.append(
                     cached_teacher_layers[layer_name].register_forward_hook(
-                        cache_output(layer_name, self.cached_teacher_output)
+                        cache_output(layer_name, self._cached_teacher_output)
                     )
                 )
             self._teacher = distillation_teacher
@@ -229,10 +250,10 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
             handle.remove()
         for handle in self.teacher_handles:
             handle.remove()
-        self.student_handles = None
-        self.teacher_handles = None
-        self.cached_student_output = None
-        self.cached_teacher_output = None
+        self._student_handles = None
+        self._teacher_handles = None
+        self._cached_student_output = None
+        self._cached_teacher_output = None
 
     def compute_distillation_loss(self, **kwargs):
         distillation_loss = 0.0
