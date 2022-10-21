@@ -85,8 +85,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
         student_features: List[int],
         teacher_features: List[int],
         gain: float,
-        student_feature_type: str = None,
-        teacher_feature_type: Optional[str] = None,
+        student_feature_names: List[str],
+        teacher_feature_names: Optional[List[str]] = None,
         start_epoch: float = -1.0,
         end_epoch: float = -1.0,
         distill_output_keys: Optional[List[Any]] = None,
@@ -107,15 +107,15 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self.student_features = student_features
         self.teacher_features = teacher_features
         self.gain = gain
-        self.student_feature_type = student_feature_type
-        self.teacher_feature_type = teacher_feature_type
+        self.student_feature_names = student_feature_names
+        self.teacher_feature_names = teacher_feature_names
         self.output_format = output_format
         self.feature_format = feature_format
         self.weight_function = weight_function
         self._student_feature_tensors = None
         self._teacher_feature_tensors = None
-        self._student_handle = None
-        self._teacher_handle = None
+        self._student_handles = None
+        self._teacher_handles = None
         self._set_compute_weight()
         self._initialize_projection()
 
@@ -166,23 +166,23 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self._gain = value
 
     @ModifierProp()
-    def student_feature_type(self) -> str:
-        return self._student_feature_type
+    def student_feature_names(self) -> List[str]:
+        return self._student_feature_names
 
-    @student_feature_type.setter
-    def student_feature_type(self, value: str):
-        self._student_feature_type = value
+    @student_feature_names.setter
+    def student_feature_names(self, value: List[str]):
+        self._student_feature_names = value
 
     @ModifierProp()
-    def teacher_feature_type(self) -> str:
-        if self._teacher_feature_type is None:
-            return self._student_feature_type
+    def teacher_feature_names(self) -> List[str]:
+        if self._teacher_feature_names is None:
+            return self._student_feature_names
         else:
-            return self._teacher_feature_type
+            return self._teacher_feature_names
 
-    @teacher_feature_type.setter
-    def teacher_feature_type(self, value: str):
-        self._teacher_feature_type = value
+    @teacher_feature_names.setter
+    def teacher_feature_names(self, value: List[str]):
+        self._teacher_feature_names = value
 
     @ModifierProp()
     def output_format(self) -> str:
@@ -269,30 +269,47 @@ class FeatureImitationModifier(BaseDistillationModifier):
         super().initialize(module, epoch, loggers, distillation_teacher, **kwargs)
 
         if isinstance(distillation_teacher, Module):
-            def cache_input(features):
+            self._student_feature_tensors = {}
+            self._teacher_feature_tensors = {}
+
+            def cache_output(layer_name, outputs):
                 def forward_hook_fn(layer, inp, out):
-                    features = inp
+                    outputs[layer_name] = out
                 return forward_hook_fn
 
-            def find_layers(layer_module, feature_type):
-                if layer_module.__class__.__name__ == feature_type:
-                    return layer_module
-                else:
-                    for child in layer_module.children():
-                        detect_layer = find_layers(child, feature_type)
-                        if detect_layer is not None:
-                            return detect_layer
-                    return None
-
-            student_detection_layer = find_layers(module, self.student_feature_type)
-            teacher_detection_layer = find_layers(self._teacher, self.teacher_feature_type)
-
-            self._student_handle = student_detection_layer.register_forward_hook(
-                        cache_input(self._student_feature_tensors)
+            def find_layers(layer_module, layer_names, cached_layers, name=""):
+                if name in layer_names:
+                    cached_layers[name] = layer_module
+                for layer_module, child in layer_module.named_children():
+                    find_layers(
+                        child,
+                        layer_names,
+                        cached_layers,
+                        name + "." + layer_module if name != "" else layer_module,
                     )
-            self._teacher_handle = teacher_detection_layer.register_forward_hook(
-                        cache_input(self._teacher_feature_tensors)
+
+            cached_student_layers = {}
+            cached_teacher_layers = {}
+            find_layers(module, self.student_feature_names, cached_student_layers)
+            find_layers(distillation_teacher, self.teacher_feature_names, cached_teacher_layers)
+
+            self._student_handles = []
+            self._teacher_handles = []
+            for layer_name in cached_student_layers:
+                self._student_handles.append(
+                    cached_student_layers[layer_name].register_forward_hook(
+                        cache_output(layer_name, self._student_feature_tensors)
                     )
+                )
+
+            for layer_name in cached_teacher_layers:
+                self._student_handles.append(
+                    cached_teacher_layers[layer_name].register_forward_hook(
+                        cache_output(layer_name, self._teacher_feature_tensors)
+                    )
+                )
+
+            self._teacher = distillation_teacher
         else:
             raise ValueError(
                 "unrecognized value for distillation_modifier given of "
@@ -316,16 +333,16 @@ class FeatureImitationModifier(BaseDistillationModifier):
         super().finalize(module, reset_loggers, **kwargs)
         self._student_handle.remove()
         self._teacher_handle.remove()
-        self._student_handle = None
-        self._teacher_handle = None
+        self._student_handles = None
+        self._teacher_handles = None
         self._student_feature_tensors = None
         self._teacher_feature_tensors = None
 
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
         distillation_loss = 0.0
         for layer in range(self.number_of_layers):
-            student_features = self._student_feature_tensors[layer]
-            teacher_features = self._teacher_feature_tensors[layer]
+            student_features = self._student_feature_tensors[self.student_feature_names[layer]]
+            teacher_features = self._teacher_feature_tensors[self.teacher_feature_names[layer]]
             self.projection[layer] = self.projection[layer].to(student_features.device)
             self.projection[layer] = self.projection[layer].to(student_features.dtype)
             student_projected_features = self.projection[layer](student_features)
