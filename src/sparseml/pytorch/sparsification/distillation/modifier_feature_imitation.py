@@ -17,7 +17,7 @@ Modifier for performing knowledge distillation via feature imitation.
 """
 
 import logging
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Union
 
 import torch
 from torch.nn import Module
@@ -27,7 +27,7 @@ from sparseml.pytorch.sparsification.distillation.modifier_distillation_base imp
     BaseDistillationModifier,
 )
 from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
-from sparseml.sparsification import SparsificationTypes
+from sparseml.pytorch.utils import BaseLogger
 
 
 __all__ = [
@@ -85,6 +85,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
         student_features: List[int],
         teacher_features: List[int],
         gain: float,
+        student_feature_type: str = None,
+        teacher_feature_type: Optional[str] = None,
         start_epoch: float = -1.0,
         end_epoch: float = -1.0,
         distill_output_keys: Optional[List[Any]] = None,
@@ -105,21 +107,17 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self.student_features = student_features
         self.teacher_features = teacher_features
         self.gain = gain
+        self.student_feature_type = student_feature_type
+        self.teacher_feature_type = teacher_feature_type
         self.output_format = output_format
         self.feature_format = feature_format
         self.weight_function = weight_function
+        self._student_features = None
+        self._teacher_features = None
+        self._student_handle = None
+        self._teacher_handle = None
         self._set_compute_weight()
         self._initialize_projection()
-
-    @BaseModifier.sparsification_types.getter
-    def sparsification_types(self) -> List[SparsificationTypes]:
-        """
-        :return: the sparsification types this modifier instance will apply
-        """
-        return [
-            SparsificationTypes.feature_distillation,
-            SparsificationTypes.distillation,
-        ]
 
     @ModifierProp()
     def number_of_classes(self) -> int:
@@ -156,18 +154,35 @@ class FeatureImitationModifier(BaseDistillationModifier):
     @ModifierProp()
     def gain(self) -> float:
         """
-        :return: how much to weight the distillation loss vs the base loss
-            (e.g. hardness of 0.6 will return 0.6 * distill_loss + 0.4 * base_loss)
+        :return: how much to weight the distillation loss
         """
         return self._gain
 
     @gain.setter
     def gain(self, value: float):
         """
-        :params value: how much to weight the distillation loss vs the base loss
-            (e.g. hardness of 0.6 will return 0.6 * distill_loss + 0.4 * base_loss)
+        :params value: how much to weight the distillation loss
         """
         self._gain = value
+
+    @ModifierProp()
+    def student_feature_type(self) -> str:
+        return self._student_feature_type
+
+    @student_feature_type.setter
+    def student_feature_type(self, value: str):
+        self._student_feature_type = value
+
+    @ModifierProp()
+    def teacher_feature_type(self) -> str:
+        if self._teacher_feature_type is None:
+            return self._student_feature_type
+        else:
+            return self._teacher_feature_type
+
+    @teacher_feature_type.setter
+    def teacher_feature_type(self, value: str):
+        self._teacher_feature_type = value
 
     @ModifierProp()
     def output_format(self) -> str:
@@ -229,11 +244,85 @@ class FeatureImitationModifier(BaseDistillationModifier):
     def compute_weight(self, value: Callable):
         self._compute_weight = value
 
+    def initialize(
+        self,
+        module: Module,
+        epoch: float = 0,
+        loggers: Optional[List[BaseLogger]] = None,
+        distillation_teacher: Union[Module, str] = "disable",
+        **kwargs,
+    ):
+        """
+        Store the teacher model for distillation if provided
+        :param module: the PyTorch model/module to modify
+        :param epoch: The epoch to initialize the modifier and module at.
+            Defaults to 0 (start of the training process)
+        :param loggers: Optional list of loggers to log the modification process to
+        :param distillation_teacher: teacher module to perform knowledge distillation
+            with. If not provided, self distillation will be used with a teacher
+             from a copy of the given module at the start epoch. If given string
+             "disable" this modifier will not apply distillation of any kind,
+             even in the active epoch range
+        :param kwargs: Optional kwargs to support specific arguments
+            for individual modifiers.
+        """
+        super().initialize(module, epoch, loggers, distillation_teacher, **kwargs)
+
+        if isinstance(distillation_teacher, Module):
+            def cache_input(features):
+                def forward_hook_fn(layer, inp, out):
+                    features = inp
+                return forward_hook_fn
+
+            def find_layers(layer_module, feature_type):
+                if layer_module.__class__.__name__ == feature_type:
+                    return layer_module
+                else:
+                    for child in layer_module.children():
+                        find_layers(child, feature_type)
+
+            student_detection_layer = find_layers(module, self.student_feature_type)
+            teacher_detection_layer = find_layers(self._teacher, self.teacher_feature_type)
+
+            self._student_handle = student_detection_layer.register_forward_hook(
+                        cache_input(self._student_features)
+                    )
+            self._teacher_handle = teacher_detection_layer.register_forward_hook(
+                        cache_input(self._teacher_features)
+                    )
+        else:
+            raise ValueError(
+                "unrecognized value for distillation_modifier given of "
+                f"{distillation_teacher}. "
+                "To disable set to 'disable' and for self attention set to 'self'"
+            )
+
+    def finalize(
+        self, module: Optional[Module] = None, reset_loggers: bool = True, **kwargs
+    ):
+        """
+        Cleans up any state and hooks
+        :param module: The model/module to finalize the modifier for.
+            Marked optional so state can still be cleaned up on delete,
+            but generally should always be passed in.
+        :param reset_loggers: True to remove any currently attached loggers (default),
+            False to keep the loggers attached.
+        :param kwargs: Optional kwargs to support specific arguments
+            for individual modifiers.
+        """
+        super().finalize(module, reset_loggers, **kwargs)
+        self._student_handle.remove()
+        self._teacher_handle.remove()
+        self._student_handle = None
+        self._teacher_handle = None
+        self._student_features = None
+        self._teacher_features = None
+
     def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
         distillation_loss = 0.0
         for layer in range(self.number_of_layers):
-            student_features = student_outputs["feature"][layer]
-            teacher_features = teacher_outputs["feature"][layer]
+            student_features = self._student_features[layer]
+            teacher_features = self._teacher_features[layer]
             self.projection[layer] = self.projection[layer].to(student_features.device)
             self.projection[layer] = self.projection[layer].to(student_features.dtype)
             student_projected_features = self.projection[layer](student_features)
@@ -290,8 +379,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
         (https://arxiv.org/abs/2112.04840)
         """
 
-        student_class_scores = self._get_scores(student_outputs["output"][layer])
-        teacher_class_scores = self._get_scores(teacher_outputs["output"][layer])
+        student_class_scores = self._get_scores(student_outputs[layer])
+        teacher_class_scores = self._get_scores(teacher_outputs[layer])
 
         weight = torch.mean(
             (student_class_scores - teacher_class_scores) ** 2,
