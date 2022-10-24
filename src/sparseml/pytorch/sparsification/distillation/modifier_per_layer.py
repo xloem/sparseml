@@ -282,8 +282,8 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         distillation_loss = 0.0
 
         for student_layer, teacher_layer in zip(self._cached_student_output, self._cached_teacher_output):
-            student_module_output = self.cached_student_output[student_layer]
-            teacher_module_output = self.cached_teacher_output[teacher_layer]
+            student_module_output = self._cached_student_output[student_layer]
+            teacher_module_output = self._cached_teacher_output[teacher_layer]
 
             output_difference = torch.mean(
                 (student_module_output - teacher_module_output) ** 2,
