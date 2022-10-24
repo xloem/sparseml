@@ -18,7 +18,6 @@ Modifier for performing knowledge distillation via feature imitation.
 
 import logging
 from typing import Any, List, Optional, Union, Mapping
-from collections import OrderedDict
 
 import torch
 from torch.nn import Module
@@ -43,6 +42,7 @@ _DISTILLATION_TYPES = [
     torch.nn.Conv3d,
     torch.nn.Linear,
 ]
+
 
 @PyTorchModifierYAML()
 class PerLayerDistillationModifier(BaseDistillationModifier):
@@ -149,7 +149,7 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         if self._teacher_names is not None:
             return self._teacher_names
         elif self.student_names is not None:
-            return self.teacher_names
+            return self.student_names
         else:
             return None
 
@@ -183,7 +183,6 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         self._cached_teacher_output = value
     '''
 
-
     def initialize(
         self,
         module: Module,
@@ -213,37 +212,32 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
             self._cached_student_output = {}
             self._cached_teacher_output = {}
 
-            cached_student_layers = OrderedDict()
-            cached_teacher_layers = OrderedDict()
-            if self.student_names is None:
-                self._find_layers_by_type(module, cached_student_layers)
-                self._find_layers_by_type(distillation_teacher, cached_teacher_layers)
+            cached_student_layers = {}
+            cached_teacher_layers = {}
 
-                cached_student_layers_ = {}
-                cached_teacher_layers_ = {}
-                for layer_name in cached_student_layers:
-                    if layer_name in cached_teacher_layers:
-                        cached_student_layers_[layer_name] = cached_student_layers[layer_name]
-                        cached_teacher_layers_[layer_name] = cached_teacher_layers[layer_name]
-                cached_student_layers = cached_student_layers_
-                cached_teacher_layers = cached_teacher_layers_
+            if self.student_names is None:
+                _find_layers_by_type(module, cached_student_layers)
+                _find_layers_by_type(distillation_teacher, cached_teacher_layers)
+
+                self._student_names = list(cached_student_layers.keys())
+                self._teacher_names = list(cached_teacher_layers.keys())
             else:
-                self._find_layers_by_name(module, self.student_feature_names, cached_student_layers)
-                self._find_layers_by_name(distillation_teacher, self.teacher_feature_names, cached_teacher_layers)
+                _find_layers_by_name(module, self.student_names, cached_student_layers)
+                _find_layers_by_name(distillation_teacher, self.teacher_names, cached_teacher_layers)
 
             self._student_handles = []
             self._teacher_handles = []
             for layer_name in cached_student_layers:
                 self._student_handles.append(
                     cached_student_layers[layer_name].register_forward_hook(
-                        self._create_cache_output_hook(layer_name, self._cached_student_output)
+                        _create_cache_output_hook(layer_name, self._cached_student_output)
                     )
                 )
 
             for layer_name in cached_teacher_layers:
                 self._student_handles.append(
                     cached_teacher_layers[layer_name].register_forward_hook(
-                        self._create_cache_output_hook(layer_name, self._cached_teacher_output)
+                        _create_cache_output_hook(layer_name, self._cached_teacher_output)
                     )
                 )
             self._teacher = distillation_teacher
@@ -281,7 +275,7 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
     def compute_distillation_loss(self, **kwargs):
         distillation_loss = 0.0
 
-        for student_layer, teacher_layer in zip(self._cached_student_output, self._cached_teacher_output):
+        for student_layer, teacher_layer in zip(self.student_names, self.teacher_names):
             student_module_output = self._cached_student_output[student_layer]
             teacher_module_output = self._cached_teacher_output[teacher_layer]
 
@@ -300,28 +294,32 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
     def compute_total_loss(self, loss, distillation_loss):
         return loss + self.gain * distillation_loss
 
-    def _create_cache_output_hook(self, layer_name, outputs):
-        def forward_hook_fn(layer, inp, out):
-            outputs[layer_name] = out
-        return forward_hook_fn
 
-    def _find_layers_by_type(self, layer_module, cached_layers, name=""):
-        if type(layer_module) in _DISTILLATION_TYPES:
-            cached_layers[name] = layer_module
-        for layer_module, child in layer_module.named_children():
-            self._find_layers_by_type(
-                child,
-                cached_layers,
-                name + "." + layer_module if name != "" else layer_module,
-            )
+def _create_cache_output_hook(layer_name, outputs):
+    def forward_hook_fn(layer, inp, out):
+        outputs[layer_name] = out
 
-    def _find_layers_by_name(self, layer_module, layer_names, cached_layers, name=""):
-        if name in layer_names:
-            cached_layers[name] = layer_module
-        for layer_module, child in layer_module.named_children():
-            self._find_layers_by_name(
-                child,
-                layer_names,
-                cached_layers,
-                name + "." + layer_module if name != "" else layer_module,
-            )
+    return forward_hook_fn
+
+
+def _find_layers_by_type(layer_module, cached_layers, name=""):
+    if type(layer_module) in _DISTILLATION_TYPES:
+        cached_layers[name] = layer_module
+    for layer_module, child in layer_module.named_children():
+        _find_layers_by_type(
+            child,
+            cached_layers,
+            name + "." + layer_module if name != "" else layer_module,
+        )
+
+
+def _find_layers_by_name(layer_module, layer_names, cached_layers, name=""):
+    if name in layer_names:
+        cached_layers[name] = layer_module
+    for layer_module, child in layer_module.named_children():
+        _find_layers_by_name(
+            child,
+            layer_names,
+            cached_layers,
+            name + "." + layer_module if name != "" else layer_module,
+        )
