@@ -22,7 +22,7 @@ from typing import Any, Callable, List, Optional, Union
 import torch
 from torch.nn import Module
 
-from sparseml.optim import BaseModifier, ModifierProp
+from sparseml.optim import ModifierProp
 from sparseml.pytorch.sparsification.distillation.modifier_distillation_base import (
     BaseDistillationModifier,
 )
@@ -95,6 +95,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
         output_format: str = "bayxo",
         feature_format: str = "boyx",
         weight_function: Optional[str] = None,
+        anchors: Optional[List[List[int]]] = None, # [[10,13, 16,30, 33,23], [30,61, 62,45, 59,119], [116,90, 156,198, 373,326]]
+        strides: Optional[List[int]] = None,       # [8, 16, 32]
     ):
         super().__init__(
             start_epoch=start_epoch,
