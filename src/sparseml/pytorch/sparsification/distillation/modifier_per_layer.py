@@ -277,6 +277,8 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         if self.project_features and self._projection is None:
             self._initialize_projection()
 
+        print(self._student_output_shapes)
+
         for index in range(len(self.student_names)):
             student_module_output = self._cached_student_output[self.student_names[index]]
             teacher_module_output = self._cached_teacher_output[self.teacher_names[index]]
@@ -306,9 +308,9 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         for index in range(len(self.student_names)):
             student_shape = self._student_output_shapes[self.student_names[index]]
             teacher_shape = self._teacher_output_shapes[self._teacher[index]]
-            student_features = student_shape[1]
-            teacher_features = teacher_shape[1]
             if len(student_shape) == 4:
+                student_features = student_shape[1]
+                teacher_features = teacher_shape[1]
                 if self.project_from == 'teacher':
                     self._projection.append(
                         torch.nn.Conv2d(
@@ -328,6 +330,8 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
                         )
                     )
             else:
+                student_features = student_shape[-1]
+                teacher_features = teacher_shape[-1]
                 if self.project_from == 'teacher':
                     self._projection.append(
                         torch.nn.Linear(
