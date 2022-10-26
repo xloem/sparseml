@@ -89,8 +89,7 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         student_names: Optional[List[str]] = None,
         teacher_names: Optional[List[str]] = None,
         project_features: bool = False,
-        student_features: Optional[List[int]] = None,
-        teacher_features: Optional[List[int]] = None,
+        project_from: str = "teacher",
     ):
         super().__init__(
             start_epoch=start_epoch,
@@ -104,17 +103,14 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         self.student_names = student_names
         self.teacher_names = teacher_names
         self.project_features = project_features
-        self.student_features = student_features
-        self.teacher_features = teacher_features
+        self.project_from = project_from
         self._cached_student_output = None
         self._cached_teacher_output = None
         self._student_handles = None
         self._teacher_handles = None
-
-        if self.project_features:
-            self._initialize_projection()
-        else:
-            self._projection = None
+        self._projection = None
+        self._student_output_shapes = None
+        self._teacher_output_shapes = None
 
     @ModifierProp()
     def gain(self) -> float:
@@ -177,23 +173,12 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         self._project_features = value
 
     @ModifierProp()
-    def student_features(self) -> List[int]:
-        return self._student_features
+    def project_from(self) -> str:
+        return self._project_from
 
-    @student_features.setter
-    def student_features(self, value: List[int]):
-        self._student_features = value
-
-    @ModifierProp()
-    def teacher_features(self) -> List[int]:
-        if self._teacher_features is None:
-            return self._student_features
-        else:
-            return self._teacher_features
-
-    @teacher_features.setter
-    def teacher_features(self, value: List[int]):
-        self._teacher_features = value
+    @project_from.setter
+    def project_from(self, value: str):
+        self._project_from = value
 
     def initialize(
         self,
@@ -223,6 +208,8 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         if isinstance(distillation_teacher, Module):
             self._cached_student_output = {}
             self._cached_teacher_output = {}
+            self._student_output_shapes = {}
+            self._teacher_output_shapes = {}
 
             cached_student_layers = {}
             cached_teacher_layers = {}
@@ -242,14 +229,14 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
             for layer_name in cached_student_layers:
                 self._student_handles.append(
                     cached_student_layers[layer_name].register_forward_hook(
-                        _create_cache_output_hook(layer_name, self._cached_student_output)
+                        _create_cache_output_hook(layer_name, self._cached_student_output, self._student_output_shapes)
                     )
                 )
 
             for layer_name in cached_teacher_layers:
                 self._student_handles.append(
                     cached_teacher_layers[layer_name].register_forward_hook(
-                        _create_cache_output_hook(layer_name, self._cached_teacher_output)
+                        _create_cache_output_hook(layer_name, self._cached_teacher_output, self._teacher_output_shapes)
                     )
                 )
             self._teacher = distillation_teacher
@@ -287,6 +274,9 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
     def compute_distillation_loss(self, **kwargs):
         distillation_loss = 0.0
 
+        if self.project_features and self._projection is None:
+            self._initialize_projection()
+
         for index in range(len(self.student_names)):
             student_module_output = self._cached_student_output[self.student_names[index]]
             teacher_module_output = self._cached_teacher_output[self.teacher_names[index]]
@@ -294,7 +284,10 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
             if self.project_features:
                 self._projection[index] = self._projection[index].to(student_module_output.device)
                 self._projection[index] = self._projection[index].to(student_module_output.dtype)
-                teacher_module_output = self._projection[index](teacher_module_output)
+                if self.project_from == 'teacher':
+                    teacher_module_output = self._projection[index](teacher_module_output)
+                else:
+                    student_module_output = self._projection[index](student_module_output)
 
             output_difference = torch.mean(
                 (student_module_output - teacher_module_output) ** 2,
@@ -309,25 +302,58 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         return distillation_loss
 
     def _initialize_projection(self):
-        projection = []
-        for student_features, teacher_features in zip(self.student_features, self.teacher_features):
-            projection.append(
-                torch.nn.Conv2d(
-                    in_channels=teacher_features,
-                    out_channels=student_features,
-                    kernel_size=1,
-                    bias=False,
-                )
-            )
-        self._projection = projection
+        self._projection = []
+        for index in range(len(self.student_names)):
+            student_shape = self._student_output_shapes[self.student_names[index]]
+            teacher_shape = self._teacher_output_shapes[self._teacher[index]]
+            student_features = student_shape[1]
+            teacher_features = teacher_shape[1]
+            if len(student_shape) == 4:
+                if self.project_from == 'teacher':
+                    self._projection.append(
+                        torch.nn.Conv2d(
+                            in_channels=teacher_features,
+                            out_channels=student_features,
+                            kernel_size=1,
+                            bias=False,
+                        )
+                    )
+                else:
+                    self._projection.append(
+                        torch.nn.Conv2d(
+                            in_channels=student_features,
+                            out_channels=teacher_features,
+                            kernel_size=1,
+                            bias=False,
+                        )
+                    )
+            else:
+                if self.project_from == 'teacher':
+                    self._projection.append(
+                        torch.nn.Linear(
+                            in_features=teacher_features,
+                            out_features=student_features,
+                            bias=False,
+                        )
+                    )
+                else:
+                    self._projection.append(
+                        torch.nn.Conv2d(
+                            in_features=student_features,
+                            out_features=teacher_features,
+                            bias=False,
+                        )
+                    )
 
     def compute_total_loss(self, loss, distillation_loss):
         return loss + self.gain * distillation_loss
 
 
-def _create_cache_output_hook(layer_name, outputs):
+def _create_cache_output_hook(layer_name, outputs, outputs_shape):
     def forward_hook_fn(layer, inp, out):
         outputs[layer_name] = out
+        if layer_name not in outputs_shape:
+            outputs_shape[layer_name] = out.shape
 
     return forward_hook_fn
 
