@@ -340,7 +340,7 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
                     )
                 else:
                     self._projection.append(
-                        torch.nn.Conv2d(
+                        torch.nn.Linear(
                             in_features=student_features,
                             out_features=teacher_features,
                             bias=False,
