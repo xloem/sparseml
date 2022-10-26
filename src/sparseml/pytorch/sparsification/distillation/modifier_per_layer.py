@@ -277,8 +277,6 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         if self.project_features and self._projection is None:
             self._initialize_projection()
 
-        print(self._student_output_shapes)
-
         for index in range(len(self.student_names)):
             student_module_output = self._cached_student_output[self.student_names[index]]
             teacher_module_output = self._cached_teacher_output[self.teacher_names[index]]
