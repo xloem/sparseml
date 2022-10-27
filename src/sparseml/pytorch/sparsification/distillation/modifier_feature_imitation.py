@@ -120,6 +120,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self._teacher_handles = None
         self._set_compute_weight()
         self._initialize_projection()
+        self._registered_parameters = False
 
     @ModifierProp()
     def number_of_classes(self) -> int:
@@ -340,14 +341,19 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self._student_feature_tensors = None
         self._teacher_feature_tensors = None
 
-    def compute_distillation_loss(self, student_outputs, teacher_outputs, **kwargs):
+    def compute_distillation_loss(self, student_outputs, teacher_outputs, optimizer, **kwargs):
+        if not self._registered_parameters:
+            parameters = [p.weight for p in self._projection]
+            optimizer.add_param_group({'params': parameters})
+            self._registered_parameters = True
+
         distillation_loss = 0.0
         for layer in range(self.number_of_layers):
             student_features = self._student_feature_tensors[self.student_feature_names[layer]]
             teacher_features = self._teacher_feature_tensors[self.teacher_feature_names[layer]]
-            self.projection[layer] = self.projection[layer].to(student_features.device)
-            self.projection[layer] = self.projection[layer].to(student_features.dtype)
-            student_projected_features = self.projection[layer](student_features)
+            self._projection[layer] = self._projection[layer].to(student_features.device)
+            self._projection[layer] = self._projection[layer].to(student_features.dtype)
+            student_projected_features = self._projection[layer](student_features)
 
             feature_difference = torch.mean(
                 (student_projected_features - teacher_features) ** 2,
@@ -378,7 +384,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
                     bias=False,
                 )
             )
-        self.projection = projection
+        self._projection = projection
 
     def _set_compute_weight(self):
         weight_methods = {"prediction": self._weight_prediction}
