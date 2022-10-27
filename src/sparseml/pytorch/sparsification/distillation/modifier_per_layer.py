@@ -271,11 +271,13 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         self._cached_student_output = None
         self._cached_teacher_output = None
 
-    def compute_distillation_loss(self, **kwargs):
+    def compute_distillation_loss(self, optimizer, **kwargs):
         distillation_loss = 0.0
 
         if self.project_features and self._projection is None:
             self._initialize_projection()
+            parameters = [p.weight for p in self._projection]
+            optimizer.add_param_group({'params': parameters})
 
         for index in range(len(self.student_names)):
             student_module_output = self._cached_student_output[self.student_names[index]]
