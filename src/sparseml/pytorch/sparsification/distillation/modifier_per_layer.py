@@ -89,7 +89,7 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         student_names: Optional[List[str]] = None,
         teacher_names: Optional[List[str]] = None,
         project_features: bool = False,
-        project_from: str = "teacher",
+        project_from: str = "student",
     ):
         super().__init__(
             start_epoch=start_epoch,
