@@ -262,9 +262,9 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
             for individual modifiers.
         """
         super().finalize(module, reset_loggers, **kwargs)
-        for handle in self.student_handles:
+        for handle in self._student_handles:
             handle.remove()
-        for handle in self.teacher_handles:
+        for handle in self._teacher_handles:
             handle.remove()
         self._student_handles = None
         self._teacher_handles = None
