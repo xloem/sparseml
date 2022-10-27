@@ -333,8 +333,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
             for individual modifiers.
         """
         super().finalize(module, reset_loggers, **kwargs)
-        self._student_handle.remove()
-        self._teacher_handle.remove()
+        self._student_handles.remove()
+        self._teacher_handles.remove()
         self._student_handles = None
         self._teacher_handles = None
         self._student_feature_tensors = None
