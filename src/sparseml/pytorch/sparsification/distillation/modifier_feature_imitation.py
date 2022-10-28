@@ -343,6 +343,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
 
     def compute_distillation_loss(self, student_outputs, teacher_outputs, optimizer, **kwargs):
         if not self._registered_parameters:
+            student_features = self._student_feature_tensors[self.student_feature_names[0]]
+            self._projection = [p.to(student_features.device) for p in self._projection]
             parameters = [p.weight for p in self._projection]
             optimizer.add_param_group({'params': parameters})
             self._registered_parameters = True
@@ -351,8 +353,6 @@ class FeatureImitationModifier(BaseDistillationModifier):
         for layer in range(self.number_of_layers):
             student_features = self._student_feature_tensors[self.student_feature_names[layer]]
             teacher_features = self._teacher_feature_tensors[self.teacher_feature_names[layer]]
-            self._projection[layer] = self._projection[layer].to(student_features.device)
-            self._projection[layer] = self._projection[layer].to(student_features.dtype)
             student_projected_features = self._projection[layer](student_features)
 
             feature_difference = torch.mean(
