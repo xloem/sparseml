@@ -353,7 +353,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
         for layer in range(self.number_of_layers):
             student_features = self._student_feature_tensors[self.student_feature_names[layer]]
             teacher_features = self._teacher_feature_tensors[self.teacher_feature_names[layer]]
-            student_projected_features = self._projection[layer](student_features)
+            student_projected_features = self._projection[layer](student_features.float())
 
             feature_difference = torch.mean(
                 (student_projected_features - teacher_features) ** 2,
