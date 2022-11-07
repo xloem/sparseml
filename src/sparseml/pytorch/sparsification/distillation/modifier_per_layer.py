@@ -295,7 +295,7 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         self._projection = []
         for index in range(len(self.student_names)):
             student_shape = self._student_output_shapes[self.student_names[index]]
-            teacher_shape = self._teacher_output_shapes[self._teacher[index]]
+            teacher_shape = self._teacher_output_shapes[self.teacher_names[index]]
             if len(student_shape) == 4:
                 student_features = student_shape[1]
                 teacher_features = teacher_shape[1]
