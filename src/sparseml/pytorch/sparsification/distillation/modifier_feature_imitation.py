@@ -17,7 +17,7 @@ Modifier for performing knowledge distillation via feature imitation.
 """
 
 import logging
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Optional, Union, Tuple
 
 import torch
 from torch.nn import Module
@@ -28,6 +28,7 @@ from sparseml.pytorch.sparsification.distillation.modifier_distillation_base imp
 )
 from sparseml.pytorch.sparsification.modifier import PyTorchModifierYAML
 from sparseml.pytorch.utils import BaseLogger
+from sparseml.pytorch.sparsification.distillation.helper import *
 
 
 __all__ = [
@@ -77,6 +78,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
         ("b"=batch size, "x"=horizontal tiles, "y"=vertical tiles, "o"=outputs)
     :param weight_function: Optional string to identify function to weight the
         difference between teacher and student feature
+    :imitation_mask_anchors: Optional List of Tuples of two floats to specify
+        preset anchor box locations for the imitation mask weighting method
     """
 
     def __init__(
@@ -98,6 +101,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
         project_features: bool = True,
         anchors: Optional[List[List[int]]] = None, # [[10,13, 16,30, 33,23], [30,61, 62,45, 59,119], [116,90, 156,198, 373,326]]
         strides: Optional[List[int]] = None,       # [8, 16, 32]
+        imitation_mask_anchors: Optional[List[Tuple[float]]] = None,
+
     ):
         super().__init__(
             start_epoch=start_epoch,
@@ -119,6 +124,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self._teacher_feature_tensors = None
         self._student_handles = None
         self._teacher_handles = None
+        self.imitation_mask_anchors = [(1.3221, 1.73145), (3.19275, 4.00944), (5.05587, 8.09892), (9.47112, 4.84053),
+                                       (11.2364, 10.0071)]
         self._set_compute_weight()
         self.project_features = project_features
         if self.project_features:
@@ -245,11 +252,18 @@ class FeatureImitationModifier(BaseDistillationModifier):
     @project_features.setter
     def project_features(self, value: bool):
         self._project_features = value
+    def imitation_mask_anchors(self) -> List[Tuple[float]]:
+        return self._imitation_mask_anchors
+
+    @imitation_mask_anchors.setter
+    def imitation_mask_anchors(self, value: List[Tuple[float]]):
+        self._imitation_mask_anchors = value
 
     @ModifierProp(serializable=False)
     def compute_weight(self) -> Callable:
         weight_methods = {
             "prediction": self._weight_prediction,
+            "imitation_mask": self._weight_imitation_mask,
         }
         if self.weight_function in weight_methods:
             return weight_methods.get(self.weight_function, None)
@@ -352,7 +366,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self._student_feature_tensors = None
         self._teacher_feature_tensors = None
 
-    def compute_distillation_loss(self, student_outputs, teacher_outputs, optimizer, **kwargs):
+    def compute_distillation_loss(self, student_outputs, teacher_outputs, optimizer, student_labels,
+                        teacher_labels):
         if self.project_features and not self._registered_parameters:
             student_features = self._student_feature_tensors[self.student_feature_names[0]]
             self._projection = [p.to(student_features.device) for p in self._projection]
@@ -373,7 +388,10 @@ class FeatureImitationModifier(BaseDistillationModifier):
             )
 
             if self.weight_function is not None:
-                weight = self.compute_weight(layer, student_outputs, teacher_outputs)
+                weight = self.compute_weight(layer, student_outputs,
+                                             teacher_outputs,
+                                             student_labels=student_labels,
+                                             teacher_labels=teacher_labels)
             else:
                 weight = 1.0
 
@@ -399,7 +417,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self._projection = projection
 
     def _set_compute_weight(self):
-        weight_methods = {"prediction": self._weight_prediction}
+        weight_methods = {"prediction": self._weight_prediction,
+                          "imitation_mask": self._weight_imitation_mask}
         if self.weight_function is None:
             self.compute_weight = None
         else:
@@ -411,7 +430,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
         )
         return torch.sigmoid(scores)
 
-    def _weight_prediction(self, layer, student_outputs, teacher_outputs):
+    def _weight_prediction(self, layer, student_outputs, teacher_outputs, **kwargs):
         """
         Prediction-guided weight for feature imitation.
         Adapted from the paper "Knowledge Distillation for Object Detection
@@ -428,3 +447,70 @@ class FeatureImitationModifier(BaseDistillationModifier):
         )
 
         return weight
+
+    def _weight_imitation_mask(self, layer, student_outputs, teacher_outputs,
+                               student_labels, teacher_labels, iou_factor=0.5):
+        """
+        IoU comparisoon based weight for feature imitation
+        Adapted from the paper "Distilling Object Detectors with Fine-grained Feature Imitation"
+        (https://arxiv.org/abs/1906.03609)
+        """
+        teacher_features = teacher_outputs[layer]
+
+        out_size = teacher_features.size(2)
+        batch_size = teacher_features.size(0)
+        device = teacher_labels.device
+
+        mask_batch = torch.zeros([batch_size, out_size, out_size])
+
+        if not len(teacher_labels):
+            return mask_batch
+
+        gt_boxes = [[] for i in range(batch_size)]
+        for i in range(len(teacher_labels)):
+            gt_boxes[int(teacher_labels[i, 0].data)] += [teacher_labels[i, 2:].clone().detach().unsqueeze(0)]
+
+        max_num = 0
+        for i in range(batch_size):
+            max_num = max(max_num, len(gt_boxes[i]))
+            if len(gt_boxes[i]) == 0:
+                gt_boxes[i] = torch.zeros((1, 4), device=device)
+            else:
+                gt_boxes[i] = torch.cat(gt_boxes[i], 0)
+
+        for i in range(batch_size):
+            if max_num - gt_boxes[i].size(0):
+                gt_boxes[i] = torch.cat((gt_boxes[i], torch.zeros((max_num - gt_boxes[i].size(0), 4), device=device)),
+                                        0)
+            gt_boxes[i] = gt_boxes[i].unsqueeze(0)
+
+        gt_boxes = torch.cat(gt_boxes, 0)
+        gt_boxes *= out_size
+
+        center_anchors = make_center_anchors(anchors_wh=self.imitation_mask_anchors, grid_size=out_size, device=device)
+        anchors = center_to_corner(center_anchors).view(-1, 4)  # (N, 4)
+
+        gt_boxes = center_to_corner(gt_boxes)
+
+        mask_batch = torch.zeros([batch_size, out_size, out_size], device=device)
+
+        for i in range(batch_size):
+            num_obj = gt_boxes[i].size(0)
+
+            if not num_obj:
+                continue
+
+            iou_map = find_jaccard_overlap(anchors, gt_boxes[i], 0).view(out_size, out_size,
+                                                                         len(self.imitation_mask_anchors), num_obj)
+            max_iou, _ = iou_map.view(-1, num_obj).max(dim=0)
+            mask_img = torch.zeros([out_size, out_size], dtype=torch.int64, requires_grad=False).type_as(teacher_features)
+            threshold = torch.mul(max_iou, iou_factor)
+
+            for k in range(num_obj):
+                mask_per_gt = torch.sum(iou_map[:, :, :, k] > threshold[k], dim=2)
+                mask_img += mask_per_gt
+                mask_img += mask_img
+            mask_batch[i] = mask_img
+
+        mask_batch = mask_batch.clamp(0, 1)
+        return mask_batch  # (B, h, w)
