@@ -701,10 +701,13 @@ def main(**kwargs):
                     "validation_ratio cannot be specified when validation set exists"
                 )
             if data_args.eval_on_test is True:
-                raise ValueError(
-                    "eval_on_test cannot be specified when validation set exists"
-                )
-            eval_dataset = raw_datasets["validation"]
+                if "test" not in raw_datasets:
+                    raise ValueError("test split not found but eval_on_test is on")
+                _LOGGER.info("Caution: eval_on_test is on, therefore using the test "
+                             "set for evaluation")
+                eval_dataset = raw_datasets["test"]
+            else:
+                eval_dataset = raw_datasets["validation"]
         elif data_args.validation_ratio is not None:
             train_dataset = (
                 raw_datasets["train"] if train_dataset is None else train_dataset

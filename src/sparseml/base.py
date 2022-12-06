@@ -281,13 +281,13 @@ def check_version(
             )
         return False
 
-    if max_version and current_version > max_version:
-        if raise_on_error:
-            raise ImportError(
-                f"required max {package_name} version {max_version}, "
-                f"found {current_version}"
-                + (f". {extra_error_message}" if extra_error_message else "")
-            )
-        return False
+    # if max_version and current_version > max_version:
+    #     if raise_on_error:
+    #         raise ImportError(
+    #             f"required max {package_name} version {max_version}, "
+    #             f"found {current_version}"
+    #             + (f". {extra_error_message}" if extra_error_message else "")
+    #         )
+    #     return False
 
     return True
