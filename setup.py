@@ -39,33 +39,35 @@ _deps = [
     "numpy>=1.0.0",
     "matplotlib>=3.0.0",
     "merge-args>=0.1.0",
-    "onnx>=1.5.0,<=1.10.1",
+    "onnx>=1.5.0,<=1.12.0",
     "pandas>=0.25.0",
     "packaging>=20.0",
     "psutil>=5.0.0",
     "pydantic>=1.5.0",
     "requests>=2.0.0",
     "scikit-image>=0.15.0",
+    "scikit-learn>=0.24.2",
     "scipy>=1.0.0",
     "tqdm>=4.0.0",
     "toposort>=1.0",
     "GPUtil>=1.4.0",
-    "protobuf>=3.12.2,<4",
+    "protobuf>=3.12.2,<=3.20.1",
     "click~=8.0.0",
 ]
 _nm_deps = [f"{'sparsezoo' if is_release else 'sparsezoo-nightly'}~={version_nm_deps}"]
 _deepsparse_deps = [
     f"{'deepsparse' if is_release else 'deepsparse-nightly'}~={version_nm_deps}"
 ]
+_deepsparse_ent_deps = [f"deepsparse-ent~={version_nm_deps}"]
 
 _onnxruntime_deps = ["onnxruntime>=1.0.0"]
 _pytorch_deps = [
-    "torch>=1.1.0,<1.9.2",
+    "torch>=1.1.0,<=1.12.1",
     "tensorboard>=1.0,<2.9",
     "tensorboardX>=1.0",
     "gputils",
 ]
-_pytorch_vision_deps = _pytorch_deps + ["torchvision>=0.3.0,<0.10.2"]
+_pytorch_vision_deps = _pytorch_deps + ["torchvision>=0.3.0,<=0.13.0"]
 _tensorflow_v1_deps = ["tensorflow<2.0.0", "tensorboard<2.0.0", "tf2onnx>=1.0.0,<1.6"]
 _tensorflow_v1_gpu_deps = [
     "tensorflow-gpu<2.0.0",
@@ -74,13 +76,15 @@ _tensorflow_v1_gpu_deps = [
 ]
 _keras_deps = ["tensorflow~=2.2.0", "keras2onnx>=1.0.0"]
 
+_open_pif_paf_deps = ["openpifpaf==0.13.6"]
+
 _dev_deps = [
     "beautifulsoup4==4.9.3",
     "black==21.5b2",
     "flake8==3.9.2",
     "isort==5.8.0",
     "m2r2~=0.2.7",
-    "mistune==0.8.4",
+    "mistune<3,>=2.0.3",
     "myst-parser~=0.14.0",
     "rinohtype~=0.4.2",
     "sphinx~=3.5.0",
@@ -116,6 +120,7 @@ def _setup_extras() -> Dict:
     return {
         "dev": _dev_deps,
         "deepsparse": _deepsparse_deps,
+        "deepsparse-ent": _deepsparse_ent_deps,
         "onnxruntime": _onnxruntime_deps,
         "torch": _pytorch_deps,
         "torchvision": _pytorch_vision_deps,
@@ -158,12 +163,21 @@ def _setup_entry_points() -> Dict:
     entry_points["console_scripts"].extend(
         [
             "sparseml.image_classification.export_onnx="
-            "sparseml.pytorch.image_classification.export:main",
+            "sparseml.pytorch.torchvision.export_onnx:main",
             "sparseml.image_classification.train="
+            "sparseml.pytorch.torchvision.train:cli",
+        ]
+    )
+
+    entry_points["console_scripts"].extend(
+        [
+            "sparseml.pytorch.image_classification.export_onnx="
+            "sparseml.pytorch.image_classification.export:main",
+            "sparseml.pytorch.image_classification.train="
             "sparseml.pytorch.image_classification.train:main",
-            "sparseml.image_classification.lr_analysis="
+            "sparseml.pytorch.image_classification.lr_analysis="
             "sparseml.pytorch.image_classification.lr_analysis:main",
-            "sparseml.image_classification.pr_sensitivity="
+            "sparseml.pytorch.image_classification.pr_sensitivity="
             "sparseml.pytorch.image_classification.pr_sensitivity:main",
         ]
     )
@@ -190,6 +204,21 @@ def _setup_entry_points() -> Dict:
             f"{yolact_top_level_callable}.train={yolact_scripts_path}:train",
             f"{yolact_top_level_callable}.validation={yolact_scripts_path}:val",
             f"{yolact_top_level_callable}.download={yolact_scripts_path}:download",
+        ]
+    )
+
+    # recipe_template entrypoint
+
+    entry_points["console_scripts"].append(
+        "sparseml.recipe_template=sparseml.pytorch.recipe_template.cli:main"
+    )
+
+    # pose detection entrypoint
+
+    entry_points["console_scripts"].extend(
+        [
+            "sparseml.openpifpaf.train=sparseml.openpifpaf.train:main",
+            "sparseml.openpifpaf.export_onnx=sparseml.openpifpaf.export:main",
         ]
     )
 
@@ -224,7 +253,7 @@ setup(
     install_requires=_setup_install_requires(),
     extras_require=_setup_extras(),
     entry_points=_setup_entry_points(),
-    python_requires=">=3.6.0,<3.10",
+    python_requires=">=3.7.0,<3.11",
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Programming Language :: Python :: 3",

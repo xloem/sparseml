@@ -57,7 +57,6 @@ from sparseml.pytorch.sparsification.quantization.helpers import (
     configure_module_bn_wrappers,
     configure_module_default_qconfigs,
     configure_module_qat_wrappers,
-    fix_observer_quant_range,
     freeze_bn_stats,
     fuse_module_conv_bn_relus,
     get_qat_qconfig,
@@ -297,7 +296,7 @@ class QuantizationModifier(ScheduledModifier):
 
     @disable_quantization_observer_epoch.setter
     def disable_quantization_observer_epoch(self, value: Union[float, None]):
-        """print
+        """
         :params value: Epoch to disable updates to the module's
             quantization observers. After this point, quantized weights and zero points
             will not be updated. Set None to not disable observers during QAT
@@ -682,6 +681,11 @@ class QuantizationModifier(ScheduledModifier):
             # set quantization config (asymmetric activations, symmetric weights)
             quant_module.qconfig = qconfig
 
+            # if for some reason the qconfig property is already set to None
+            # in a submodule, the desired qconfig will not be propagated if
+            # appropriate, calling helper function to delete these
+            _clear_null_qconfigs(quant_module)
+
             # wrap all conv / linear blocks in with quantization observers
             torch_quantization.propagate_qconfig_(quant_module)
             configure_module_default_qconfigs(quant_module)
@@ -695,7 +699,7 @@ class QuantizationModifier(ScheduledModifier):
             )
 
         # remove qconfigs for module types in exclude_module_types
-        to_exclude = []
+        to_exclude = ["Softmax"]
         if self.exclude_module_types:
             to_exclude.extend(self.exclude_module_types)
 
@@ -712,9 +716,6 @@ class QuantizationModifier(ScheduledModifier):
         torch_quantization.prepare_qat(module, inplace=True)
         if self._quantize_embeddings:
             prepare_embeddings_qat(module, qproperties)
-
-        # propagate custom quant min/max range from FakeQuantize to Observer objects
-        fix_observer_quant_range(module)
 
         self._qat_enabled = True
         self._calibrate_if_possible(module)
@@ -820,3 +821,9 @@ class QuantizationModifier(ScheduledModifier):
                     self._freeze_bn_stats_epoch, self._start_epoch
                 )
             )
+
+
+def _clear_null_qconfigs(model: Module):
+    for submodule in model.modules():
+        if hasattr(submodule, "qconfig") and submodule.qconfig is None:
+            del submodule.qconfig

@@ -17,9 +17,10 @@ Code related to interacting with a trained model such as saving, loading, etc
 """
 
 from collections import OrderedDict
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
+from packaging import version
 from torch.nn import DataParallel, Module
 from torch.optim.optimizer import Optimizer
 
@@ -38,7 +39,6 @@ try:
 except Exception as ddp_error:
     DDP = None
     ddp_import_error = ddp_error
-
 
 __all__ = [
     "load_model",
@@ -79,7 +79,13 @@ def load_model(
     """
     if path.startswith("zoo:"):
         path = download_framework_model_by_recipe_type(Model(path))
-    model_dict = torch.load(path, map_location="cpu")
+    model_dict: Union[Module, Dict[str, Any]] = torch.load(path, map_location="cpu")
+
+    if isinstance(model_dict, Module):
+        model_dict = {
+            "state_dict": model_dict.state_dict(),
+        }
+
     recipe = model_dict.get("recipe")
 
     if recipe:
@@ -241,7 +247,7 @@ def save_model(
     if arch_key:
         save_dict["arch_key"] = arch_key
 
-    if torch.__version__ < "1.6":
+    if version.parse(torch.__version__) < version.parse("1.6"):
         torch.save(save_dict, path)
     else:
         torch.save(

@@ -21,6 +21,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 
 import torch
+from packaging import version
 from torch.utils.data import DataLoader
 
 from sparseml.pytorch.optim import ScheduledModifierManager, ScheduledOptimizer
@@ -200,7 +201,7 @@ class ImageClassificationTrainer(Trainer):
             raise ValueError(f"Invalid train mode '{mode}', must be 'train' or 'val'")
 
         if (
-            torch.__version__ < "1.9"
+            version.parse(torch.__version__) < version.parse("1.9")
             and self.manager
             and (self.manager.qat_active(epoch=self.epoch))
         ):
@@ -332,7 +333,7 @@ class ImageClassificationTrainer(Trainer):
         )
 
     def _setup_checkpoint_manager(self):
-        if self.checkpoint_path and self.checkpoint_path.startswith("zoo"):
+        if self.checkpoint_path and self.checkpoint_path.startswith("zoo:"):
             zoo_model = Model(self.checkpoint_path)
             self.checkpoint_path = download_framework_model_by_recipe_type(zoo_model)
 

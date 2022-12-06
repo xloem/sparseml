@@ -33,6 +33,7 @@ from sparseml.utils import FRAMEWORK_METADATA_KEY, RECIPE_METADATA_KEY
 
 STAGED_RECIPE_COMPLEX = """
 sparsity: {sparsity}
+lr_func: {lr_func}
 init_lr: 0.05
 final_lr: 0.0
 end_epoch: 100
@@ -66,7 +67,7 @@ ac_dc_phase:
   - !LearningRateFunctionModifier
     start_epoch: eval(end_warm_up_epoch)
     end_epoch: eval(end_epoch_global)
-    lr_func: {lr_func}
+    lr_func: eval(lr_func)
     init_lr: eval(final_lr)
     final_lr: 0.0
 
@@ -96,6 +97,7 @@ next_stage:
 
 STAGED_RECIPE_COMPLEX_EVAL = """
 sparsity: 0.9
+lr_func: cosine
 init_lr: 0.05
 final_lr: 0.0
 end_epoch: 100
@@ -238,6 +240,7 @@ pruning_start_epoch: eval(num_epochs * 0.2)
 pruning_end_epoch: eval(num_epochs * 0.8)
 init_sparsity: 0.2
 num_pruning_epochs: 6
+pruning_mask_type: [1, 4]
 
 modifiers:
     - !EpochRangeModifier
@@ -250,7 +253,7 @@ modifiers:
         init_sparsity: eval(init_sparsity)
         inter_func: cubic
         leave_enabled: True
-        mask_type: [1, 4]
+        mask_type: eval(pruning_mask_type)
         params: __ALL_PRUNABLE__
         start_epoch: eval(pruning_start_epoch)
         update_frequency: 0.01
@@ -262,6 +265,7 @@ pruning_end_epoch: eval(pruning_start_epoch + num_pruning_epochs)
 pruning_start_epoch: eval(num_epochs * 0.2)
 num_pruning_epochs: 6
 init_sparsity: 0.2
+pruning_mask_type: [1, 4]
 
 modifiers:
     - !EpochRangeModifier
@@ -274,7 +278,7 @@ modifiers:
         init_sparsity: eval(init_sparsity)
         inter_func: cubic
         leave_enabled: True
-        mask_type: [1, 4]
+        mask_type: eval(pruning_mask_type)
         params: __ALL_PRUNABLE__
         start_epoch: eval(pruning_start_epoch)
         update_frequency: 0.01
@@ -286,6 +290,7 @@ init_sparsity: 0.2
 pruning_start_epoch: 2.0
 pruning_end_epoch: 8.0
 num_pruning_epochs: 6
+pruning_mask_type: [1, 4]
 
 modifiers:
 - !EpochRangeModifier
@@ -649,16 +654,16 @@ def test_load_recipe_yaml_str_zoo(zoo_path):
         ),
         (
             STAGED_RECIPE_COMPLEX.format(
-                sparsity=0.9, num_epochs=10, lr_func="cosine", new_num_epochs=15
+                sparsity=0.9, num_epochs=10, lr_func="linear", new_num_epochs=15
             ),
             {
                 "sparsity": 0.5,
                 "num_epochs": 11,
-                "lr_func": "linear",
+                "lr_func": "cosine",
                 "new_num_epochs": 13,
             },
             STAGED_RECIPE_COMPLEX.format(
-                sparsity=0.5, num_epochs=11, lr_func="linear", new_num_epochs=13
+                sparsity=0.5, num_epochs=11, lr_func="cosine", new_num_epochs=13
             ),
             False,
         ),

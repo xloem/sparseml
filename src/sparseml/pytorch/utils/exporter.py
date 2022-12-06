@@ -28,11 +28,14 @@ import numpy
 import onnx
 import torch
 from onnx import numpy_helper
+from packaging import version
 from torch import Tensor
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 
+from sparseml.onnx.utils import ONNXGraph
+from sparseml.pytorch.opset import TORCH_DEFAULT_ONNX_OPSET
 from sparseml.pytorch.utils.helpers import (
     tensors_export,
     tensors_module_forward,
@@ -52,8 +55,8 @@ __all__ = [
     "export_onnx",
 ]
 
+_PARSED_TORCH_VERSION = version.parse(torch.__version__)
 
-DEFAULT_ONNX_OPSET = 9 if torch.__version__ < "1.3" else 11
 MODEL_ONNX_NAME = "model.onnx"
 CONFIG_JSON_NAME = "config.json"
 _LOGGER = logging.getLogger(__name__)
@@ -172,7 +175,7 @@ class ModuleExporter(object):
         self,
         sample_batch: Any,
         name: str = MODEL_ONNX_NAME,
-        opset: int = DEFAULT_ONNX_OPSET,
+        opset: int = TORCH_DEFAULT_ONNX_OPSET,
         disable_bn_fusing: bool = True,
         convert_qat: bool = False,
         **export_kwargs,
@@ -185,8 +188,8 @@ class ModuleExporter(object):
         :param sample_batch: the batch to export an onnx for, handles creating the
             static graph for onnx as well as setting dimensions
         :param name: name of the onnx file to save
-        :param opset: onnx opset to use for exported model. Default is 11, if torch
-            version is 1.2 or below, default is 9
+        :param opset: onnx opset to use for exported model.
+            Default is based on torch version.
         :param disable_bn_fusing: torch >= 1.7.0 only. Set True to disable batch norm
             fusing during torch export. Default and suggested setting is True. Batch
             norm fusing will change the exported parameter names as well as affect
@@ -403,7 +406,7 @@ def export_onnx(
     module: Module,
     sample_batch: Any,
     file_path: str,
-    opset: int = DEFAULT_ONNX_OPSET,
+    opset: int = TORCH_DEFAULT_ONNX_OPSET,
     disable_bn_fusing: bool = True,
     convert_qat: bool = False,
     dynamic_axes: Union[str, Dict[str, List[int]]] = None,
@@ -419,8 +422,8 @@ def export_onnx(
     :param sample_batch: the batch to export an onnx for, handles creating the
         static graph for onnx as well as setting dimensions
     :param file_path: path to the onnx file to save
-    :param opset: onnx opset to use for exported model. Default is 11, if torch
-        version is 1.2 or below, default is 9
+    :param opset: onnx opset to use for exported model.
+        Default is based on torch version.
     :param disable_bn_fusing: torch >= 1.7.0 only. Set True to disable batch norm
         fusing during torch export. Default and suggested setting is True. Batch
         norm fusing will change the exported parameter names as well as affect
@@ -443,6 +446,13 @@ def export_onnx(
         See more on the torch.onnx.export api spec in the PyTorch docs:
         https://pytorch.org/docs/stable/onnx.html
     """
+    if _PARSED_TORCH_VERSION >= version.parse("1.10.0") and opset < 13 and convert_qat:
+        warnings.warn(
+            "Exporting onnx with QAT and opset < 13 may result in errors. "
+            "Please use opset>=13 with QAT. "
+            "See https://github.com/pytorch/pytorch/issues/77455 for more info. "
+        )
+
     if not export_kwargs:
         export_kwargs = {}
 
@@ -460,7 +470,6 @@ def export_onnx(
     create_parent_dirs(file_path)
 
     module = deepcopy(module).cpu()
-    module.eval()
 
     with torch.no_grad():
         out = tensors_module_forward(sample_batch, module, check_feat_lab_inp=False)
@@ -483,13 +492,19 @@ def export_onnx(
     if "output_names" not in export_kwargs:
         export_kwargs["output_names"] = _get_output_names(out)
 
-    if dynamic_axes == "batch":
-        dynamic_axes = {
-            tensor_name: {0: "batch"}
-            for tensor_name in (
-                export_kwargs["input_names"] + export_kwargs["output_names"]
-            )
-        }
+    if dynamic_axes is not None:
+        warnings.warn(
+            "`dynamic_axes` is deprecated and does not affect anything. "
+            "The 0th axis is always treated as dynamic.",
+            category=DeprecationWarning,
+        )
+
+    dynamic_axes = {
+        tensor_name: {0: "batch"}
+        for tensor_name in (
+            export_kwargs["input_names"] + export_kwargs["output_names"]
+        )
+    }
 
     # disable active quantization observers because they cannot be exported
     disabled_observers = []
@@ -506,21 +521,33 @@ def export_onnx(
         for submodule in module.modules()
     )
     batch_norms_wrapped = False
-    if torch.__version__ >= "1.7" and not is_quant_module and disable_bn_fusing:
+    if (
+        _PARSED_TORCH_VERSION >= version.parse("1.7")
+        and not is_quant_module
+        and disable_bn_fusing
+    ):
         # prevent batch norm fusing by adding a trivial operation before every
         # batch norm layer
         batch_norms_wrapped = _wrap_batch_norms(module)
 
-    torch.onnx.export(
-        module,
-        sample_batch,
-        file_path,
-        strip_doc_string=True,
+    kwargs = dict(
+        model=module,
+        args=sample_batch,
+        f=file_path,
         verbose=False,
         opset_version=opset,
         dynamic_axes=dynamic_axes,
         **export_kwargs,
     )
+
+    if _PARSED_TORCH_VERSION < version.parse("1.10.0"):
+        kwargs["strip_doc_string"] = True
+    else:
+        kwargs["training"] = torch.onnx.TrainingMode.PRESERVE
+        kwargs["do_constant_folding"] = not module.training
+        kwargs["keep_initializers_as_inputs"] = False
+
+    torch.onnx.export(**kwargs)
 
     # re-enable disabled quantization observers
     for submodule in disabled_observers:
@@ -528,9 +555,12 @@ def export_onnx(
 
     # onnx file fixes
     onnx_model = onnx.load(file_path)
-    # fix changed batch norm names
-    _fix_batch_norm_names(onnx_model)
+    _fold_identity_initializers(onnx_model)
+    _flatten_qparams(onnx_model)
     if batch_norms_wrapped:
+        # fix changed batch norm names
+        _unwrap_batchnorms(onnx_model)
+
         # clean up graph from any injected / wrapped operations
         _delete_trivial_onnx_adds(onnx_model)
     onnx.save(onnx_model, file_path)
@@ -633,6 +663,68 @@ def _save_label_to_class_mapping(
     )
 
 
+def _flatten_qparams(model: onnx.ModelProto):
+    # transforms any QuantizeLinear/DequantizeLinear that have
+    # zero_point/scale with shapes `(1,)` into shape `()`
+    graph = ONNXGraph(model)
+
+    inits_to_flatten = set()
+
+    for node in model.graph.node:
+        if node.op_type in ["QuantizeLinear", "DequantizeLinear"]:
+            # scale is required if the input is an initializer
+            scale_init = graph.get_init_by_name(node.input[1])
+            if scale_init is not None and list(scale_init.dims) == [1]:
+                inits_to_flatten.add(node.input[1])
+
+                # zero_point is optional AND shape must match
+                # scale. so if scale is (1,), then so will zero point
+                if len(node.input) == 3:
+                    inits_to_flatten.add(node.input[2])
+
+    for i, init in enumerate(model.graph.initializer):
+        if init.name not in inits_to_flatten:
+            continue
+        a = numpy_helper.to_array(init)
+        assert a.shape == (1,)
+        b = numpy.array(a[0])
+        assert b.shape == ()
+        assert b.dtype == a.dtype
+        model.graph.initializer[i].CopyFrom(numpy_helper.from_array(b, name=init.name))
+
+
+def _fold_identity_initializers(model: onnx.ModelProto):
+    # folds any Identity nodes that have a single input (which is an initializer)
+    # and a single output
+    matches = []
+
+    graph = ONNXGraph(model)
+
+    def is_match(node: onnx.NodeProto) -> bool:
+        return (
+            node.op_type == "Identity"
+            and len(node.input) == 1
+            and len(node.output) == 1
+            and node.input[0] in graph._name_to_initializer
+        )
+
+    for node in model.graph.node:
+        if not is_match(node):
+            continue
+        matches.append(node)
+
+        # find any node in the graph that uses the output of `node`
+        # as an input. replace the input with `node`'s input
+        for other in graph.get_node_children(node):
+            for i, other_input_i in enumerate(other.input):
+                # NOTE: this just replaces the str ids
+                if other_input_i == node.output[0]:
+                    other.input[i] = node.input[0]
+
+    for node in matches:
+        model.graph.node.remove(node)
+
+
 def _get_output_names(out: Any):
     """
     Get name of output tensors
@@ -655,11 +747,11 @@ class _AddNoOpWrapper(Module):
 
     def __init__(self, module: Module):
         super().__init__()
-        self.module = module
+        self.bn_wrapper_replace_me = module
 
     def forward(self, inp):
         inp = inp + 0  # no-op
-        return self.module(inp)
+        return self.bn_wrapper_replace_me(inp)
 
 
 def _get_submodule(module: Module, path: List[str]) -> Module:
@@ -711,25 +803,13 @@ def _delete_trivial_onnx_adds(model: onnx.ModelProto):
             continue
 
 
-def _fix_batch_norm_names(model: onnx.ModelProto):
-    name_to_inits = {init.name: init for init in model.graph.initializer}
+def _unwrap_batchnorms(model: onnx.ModelProto):
+    for init in model.graph.initializer:
+        init.name = init.name.replace(".bn_wrapper_replace_me", "")
     for node in model.graph.node:
-        if node.op_type != "BatchNormalization":
-            continue
         for idx in range(len(node.input)):
-            init_name = node.input[idx]
-            name_parts = init_name.split(".")
-            if (
-                init_name not in name_to_inits
-                or len(name_parts) < 2
-                or (name_parts[-2] != "module")
-            ):
-                continue
-            del name_parts[-2]
-            new_name = ".".join(name_parts)
-            if new_name not in name_to_inits:
-                init = name_to_inits[init_name]
-                del name_to_inits[init_name]
-                init.name = new_name
-                node.input[idx] = new_name
-                name_to_inits[new_name] = init
+            node.input[idx] = node.input[idx].replace(".bn_wrapper_replace_me", "")
+        for idx in range(len(node.output)):
+            node.output[idx] = node.output[idx].replace(".bn_wrapper_replace_me", "")
+
+    onnx.checker.check_model(model)

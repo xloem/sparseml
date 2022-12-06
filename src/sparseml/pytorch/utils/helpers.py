@@ -56,6 +56,14 @@ except Exception as _err:
     quant_conv3d_err = _err
     QATConv3d = None
 
+
+try:
+    from transformers.modeling_utils import Conv1D as GPTConv1D
+except Exception as _err:
+    gpt_conv1d_err = _err
+    GPTConv1D = None
+
+
 __all__ = [
     "default_device",
     "device_of",
@@ -318,7 +326,7 @@ def tensors_to_device(
             [(key, tensors_to_device(tens, device)) for key, tens in tensors.items()]
         )
 
-    if isinstance(tensors, Dict):
+    if isinstance(tensors, Mapping):
         return {key: tensors_to_device(tens, device) for key, tens in tensors.items()}
 
     if isinstance(tensors, tuple):
@@ -344,7 +352,7 @@ def tensors_to_precision(
     if isinstance(tensors, Tensor):
         return tensors.float() if full_precision else tensors.half()
 
-    if isinstance(tensors, Dict):
+    if isinstance(tensors, Mapping):
         return {
             key: tensors_to_precision(tens, full_precision)
             for key, tens in tensors.items()
@@ -761,7 +769,9 @@ def get_conv_layers(module: Module) -> Dict[str, Module]:
     :return: a list of all the conv layers in the module
     """
     return {
-        name: mod for name, mod in module.named_modules() if isinstance(mod, _ConvNd)
+        name: mod
+        for name, mod in module.named_modules()
+        if (isinstance(mod, _ConvNd) or (GPTConv1D and isinstance(mod, GPTConv1D)))
     }
 
 
@@ -790,6 +800,7 @@ def get_prunable_layers(module: Module) -> List[Tuple[str, Module]]:
             or (QATLinear and isinstance(mod, QATLinear))
             or (QATConv2d and isinstance(mod, QATConv2d))
             or (QATConv3d and isinstance(mod, QATConv3d))
+            or (GPTConv1D and isinstance(mod, GPTConv1D))
         )
     ]
 
@@ -970,13 +981,13 @@ def set_deterministic_seeds(seed: int = 0):
 
 
 @contextmanager
-def torch_distributed_zero_first(local_rank: int):
+def torch_distributed_zero_first(local_rank: Optional[int]):
     """
     Decorator to make all processes in distributed training wait for each
     local 0 ranked process to do something.
     :param local_rank: the local rank of this process
     """
-    if local_rank not in [-1, 0]:
+    if local_rank is not None and local_rank not in [-1, 0]:
         torch.distributed.barrier()
     yield
     if local_rank == 0:
@@ -1119,7 +1130,7 @@ def memory_aware_threshold(tensor: torch.Tensor, idx: int) -> Tensor:
 
 
 def download_framework_model_by_recipe_type(
-    zoo_model: Model, recipe_name: Optional[str] = None
+    zoo_model: Model, recipe_name: Optional[str] = None, model_suffix: str = "pth"
 ) -> str:
     """
     Extract the path of the framework model from the
@@ -1127,6 +1138,7 @@ def download_framework_model_by_recipe_type(
     By default, the function will return path to the final framework model
     :params zoo_model: model object from sparsezoo
     :params recipe_name: a name of the recipe (e.g. "transfer_learn", "original" etc.)
+    :params model_suffix: model_suffix that models are saved with
     :return: path to the framework model
     """
 
@@ -1135,12 +1147,15 @@ def download_framework_model_by_recipe_type(
         zoo_model.stub_params.get("recipe_type") or zoo_model.stub_params.get("recipe")
     )
 
-    if recipe_name:
-        if "transfer" in recipe_name.lower():
-            # fetching the model for transfer learning
-            framework_model = zoo_model.training.default.get_file("model.ckpt.pth")
-    else:
-        # fetching the model for inference
-        framework_model = zoo_model.training.default.get_file("model.pth")
+    framework_model = None
+    if recipe_name and "transfer" in recipe_name.lower():
+        # fetching the model for transfer learning
+        model_name = f"model.ckpt.{model_suffix}"
+        framework_model = zoo_model.training.default.get_file(model_name)
+
+    if framework_model is None:
+        # fetching the model for inference or fall back if model.ckpt.pth doesn't exist
+        model_name = f"model.{model_suffix}"
+        framework_model = zoo_model.training.default.get_file(model_name)
 
     return framework_model.path
