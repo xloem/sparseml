@@ -95,6 +95,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
         output_format: str = "bayxo",
         feature_format: str = "boyx",
         weight_function: Optional[str] = None,
+        project_features: bool = True,
         anchors: Optional[List[List[int]]] = None, # [[10,13, 16,30, 33,23], [30,61, 62,45, 59,119], [116,90, 156,198, 373,326]]
         strides: Optional[List[int]] = None,       # [8, 16, 32]
     ):
@@ -119,8 +120,10 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self._student_handles = None
         self._teacher_handles = None
         self._set_compute_weight()
-        self._initialize_projection()
-        self._registered_parameters = False
+        self.project_features = project_features
+        if self.project_features:
+            self._initialize_projection()
+            self._registered_parameters = False
 
     @ModifierProp()
     def number_of_classes(self) -> int:
@@ -235,6 +238,14 @@ class FeatureImitationModifier(BaseDistillationModifier):
     def projection(self, value: List[Module]):
         self._projection = value
 
+    @ModifierProp()
+    def project_features(self) -> bool:
+        return self._project_features
+
+    @project_features.setter
+    def project_features(self, value: bool):
+        self._project_features = value
+
     @ModifierProp(serializable=False)
     def compute_weight(self) -> Callable:
         weight_methods = {
@@ -342,7 +353,7 @@ class FeatureImitationModifier(BaseDistillationModifier):
         self._teacher_feature_tensors = None
 
     def compute_distillation_loss(self, student_outputs, teacher_outputs, optimizer, **kwargs):
-        if not self._registered_parameters:
+        if self.project_features and not self._registered_parameters:
             student_features = self._student_feature_tensors[self.student_feature_names[0]]
             self._projection = [p.to(student_features.device) for p in self._projection]
             parameters = [p.weight for p in self._projection]
@@ -351,12 +362,13 @@ class FeatureImitationModifier(BaseDistillationModifier):
 
         distillation_loss = 0.0
         for layer in range(self.number_of_layers):
-            student_features = self._student_feature_tensors[self.student_feature_names[layer]]
-            teacher_features = self._teacher_feature_tensors[self.teacher_feature_names[layer]]
-            student_projected_features = self._projection[layer](student_features.float())
+            student_features = self.student_feature_names[layer]
+            teacher_features = self.teacher_feature_names[layer]
+            if self.project_features:
+                student_features = self._projection[layer](student_features.float())
 
             feature_difference = torch.mean(
-                (student_projected_features - teacher_features) ** 2,
+                (student_features - teacher_features) ** 2,
                 dim=self.feature_dimension,
             )
 
