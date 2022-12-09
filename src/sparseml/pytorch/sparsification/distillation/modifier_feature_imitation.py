@@ -252,6 +252,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
     @project_features.setter
     def project_features(self, value: bool):
         self._project_features = value
+   
+    @ModifierProp()
     def imitation_mask_anchors(self) -> List[Tuple[float]]:
         return self._imitation_mask_anchors
 
