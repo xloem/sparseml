@@ -23,3 +23,4 @@ from .base_transform import *
 from .onnx_transform import *
 
 from .fold_identity_initializers import *
+from .propagate_mobilebert_embedding_quantization import *
