@@ -362,8 +362,8 @@ class FeatureImitationModifier(BaseDistillationModifier):
 
         distillation_loss = 0.0
         for layer in range(self.number_of_layers):
-            student_features = self.student_feature_names[layer]
-            teacher_features = self.teacher_feature_names[layer]
+            student_features = self._student_feature_tensors[self.student_feature_names[layer]]
+            teacher_features = self._teacher_feature_tensors[self.teacher_feature_names[layer]]
             if self.project_features:
                 student_features = self._projection[layer](student_features.float())
 
