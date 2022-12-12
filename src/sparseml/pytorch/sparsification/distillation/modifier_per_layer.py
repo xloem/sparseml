@@ -75,6 +75,8 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
     :param gain: How much to weight the distillation loss. Default is 1.5
     :param normalize: Whether to normalize the output difference by the
         the magnitude of the teacher's output
+    :param epsilon: Small value used to avoid division by zero when normalization
+        is used. Default is 1.e-6
     """
 
     def __init__(
@@ -89,6 +91,7 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         student_names: Optional[List[str]] = None,
         teacher_names: Optional[List[str]] = None,
         project_features: bool = False,
+        epsilon: float = 1.e-6,
     ):
         super().__init__(
             start_epoch=start_epoch,
@@ -102,6 +105,7 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
         self.student_names = student_names
         self.teacher_names = teacher_names
         self.project_features = project_features
+        self.epsilon = epsilon
         self._cached_student_output = None
         self._cached_teacher_output = None
         self._student_handles = None
@@ -140,6 +144,20 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
             by magnitude of teacher output
         """
         self._normalize = value
+
+    @ModifierProp()
+    def epsilon(self) -> float:
+        """
+        :return: small value to avoid division per zero when normalization is used
+        """
+        return self._epsilon
+
+    @normalize.setter
+    def epsilon(self, value: float):
+        """
+        :params value: small value to avoid division per zero when normalization is used
+        """
+        self._epsilon = value
 
     @ModifierProp()
     def student_names(self) -> List[str]:
@@ -285,7 +303,7 @@ class PerLayerDistillationModifier(BaseDistillationModifier):
 
             if self.normalize:
                 teacher_output_magnitude = torch.mean(teacher_module_output ** 2)
-                output_difference /= teacher_output_magnitude
+                output_difference /= (teacher_output_magnitude + self.epsilon)
 
             distillation_loss += output_difference
 
