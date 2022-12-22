@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import math
-from typing import List, Union
+from typing import List, Optional, Union
 
 from torch.nn import Module, Parameter
 from torch.optim.optimizer import Optimizer
@@ -85,22 +85,49 @@ class ACDCPruningModifier(BasePruningModifier):
         compression_sparsity: float,
         start_epoch: Union[int, float],
         end_epoch: Union[int, float],
-        update_frequency: Union[int, float],
         params: Union[str, List[str]],
         global_sparsity: bool = True,
         leave_enabled: bool = True,
         momentum_buffer_reset: bool = True,
         mask_type: str = "unstructured",
+        update_frequency: Optional[Union[int, float]] = None,
+        number_compression_epochs: Optional[int] = None,
+        number_decompression_epochs: Optional[int] = None,
     ):
-        # AC/DC assumes that variables `start_epoch`, `end_epoch`
-        # and `update_frequency` are integers.
+
         start_epoch = self._assert_is_integer(start_epoch)
         end_epoch = self._assert_is_integer(end_epoch)
-        update_frequency = self._assert_is_integer(update_frequency)
 
-        # because method does not involve any interpolation
-        # compression sparsity (final sparsity) is a single float.
+        if (
+            number_compression_epochs is None or number_decompression_epochs is None
+        ) and number_compression_epochs != number_decompression_epochs:
+            raise ValueError(
+                "`number_compression_epochs` should be provided if `number_decompression_epochs` is provided"
+            )
+        if number_compression_epochs:
+            if update_frequency:
+                raise ValueError(
+                    "Either `number_compression(decompression)_epochs` or `update_frequency` should be provided"
+                )
+            if (end_epoch - start_epoch) % (
+                number_compression_epochs + number_decompression_epochs
+            ) != 0:
+                raise ValueError(
+                    "The number of total number of epochs should be divisible by the sum of `number_compression_epochs` and `number_decompression_epochs`"
+                )
+
+        update_frequency = (
+            self._assert_is_integer(update_frequency)
+            if update_frequency
+            else min(number_compression_epochs, number_decompression_epochs)
+        )
+
+        self._update_frequency = update_frequency
+        self._number_compression_epochs = number_compression_epochs
+        self._number_decompression_epochs = number_decompression_epochs
+
         self._compression_sparsity = compression_sparsity
+        self._momentum_buffer_reset = momentum_buffer_reset
         self._decompression_sparsity = 0.0  # this is implicitly assumed in paper.
         self._is_phase_decompression = True
         self._num_phase = None
@@ -165,13 +192,28 @@ class ACDCPruningModifier(BasePruningModifier):
         if epoch == float("inf"):
             return self._compression_sparsity
 
-        self._num_phase = math.floor((epoch - self.start_epoch) / self.update_frequency)
+        if self._number_decompression_epochs:
+            decompression_phase = self._is_decompression_phase(
+                epoch,
+                self._number_compression_epochs,
+                self._number_decompression_epochs,
+                self.end_epoch - self.start_epoch,
+            )
+        else:
+            self._num_phase = math.floor(
+                (epoch - self.start_epoch) / self.update_frequency
+            )
+            decompression_phase = (self._num_phase % 2 == 0) and (
+                self.end_epoch - self.update_frequency > epoch
+            )
 
-        if self._num_phase % 2 == 0 and self.end_epoch - self.update_frequency > epoch:
+        if decompression_phase:
+            print(f"Epoch: {epoch}: starting decompression phase")
             # entering decompression phase
             self._is_phase_decompression = True
             applied_sparsity = self._decompression_sparsity
         else:
+            print(f"Epoch: {epoch}: starting compression phase")
             # entering compression phase
             self._is_phase_decompression = False
             applied_sparsity = self._compression_sparsity
@@ -254,3 +296,22 @@ class ACDCPruningModifier(BasePruningModifier):
                 "However: type(x)==float and x.is_integer() == False."
             )
         return int(x)
+
+    @staticmethod
+    def _is_decompression_phase(
+        match_epoch,
+        number_compression_epochs,
+        number_decompression_epochs,
+        total_epochs,
+    ):
+        decompression_phase_range = [0, number_decompression_epochs]
+        while decompression_phase_range[0] < total_epochs:
+            if (
+                decompression_phase_range[0]
+                <= match_epoch
+                < decompression_phase_range[1]
+            ):
+                return True
+            decompression_phase_range[0] += number_compression_epochs + 1
+            decompression_phase_range[1] += number_compression_epochs + 1
+        return False
