@@ -361,6 +361,7 @@ def _find_layers_by_type(layer_module, cached_layers, name=""):
 
 
 def _find_layers_by_name(layer_module, layer_names, cached_layers, name=""):
+    name = name.replace("module.", "")
     if name in layer_names:
         cached_layers[name] = layer_module
     for layer_module, child in layer_module.named_children():
