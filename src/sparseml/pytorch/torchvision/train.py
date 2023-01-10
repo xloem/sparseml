@@ -518,7 +518,11 @@ def main(args):
     if manager is not None:
         manager.initialize(model, epoch=args.start_epoch, loggers=logger)
         optimizer = manager.modify(
-            model, optimizer, len(data_loader), epoch=args.start_epoch
+            model,
+            optimizer,
+            len(data_loader),
+            epoch=args.start_epoch,
+            wrap_optim=scaler,
         )
 
     lr_scheduler = _get_lr_scheduler(
