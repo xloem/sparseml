@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0
 
 N_GPUS=$(($(echo $CUDA_VISIBLE_DEVICES | grep -o "," | wc -l)+1))
 
@@ -9,7 +9,7 @@ ROOT=$HOME/src/neuralmagic/sparseml/src/sparseml/pytorch/torchvision
 DST_MODEL_DIR=/nm/drive3/tuan/models/efficientnet/ongoing
 
 RECIPE_DIR=$ROOT/recipes
-RECIPE_NAME=dense_quantize_v2
+RECIPE_NAME=dense_quantize_v3
 
 SRC_MODEL_NAME=efficientnet_v2_s
 
@@ -25,9 +25,9 @@ GRAD_ACCUM=4
 
 OPT=rmsprop
 
-for NUM_EPOCHS in 3
+for NUM_EPOCHS in 10
 do
-for LR in 1e-5 1e-4
+for LR in 2e-4
 do
 
 ID=$RANDOM
