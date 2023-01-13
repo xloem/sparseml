@@ -906,6 +906,8 @@ def _deprecate_old_arguments(f):
     help="number of data loading workers",
 )
 @click.option("--opt", default="sgd", type=str, help="optimizer")
+@click.option("--rmsprop-eps", default=1e-8, type=float, help="Epsilon value used in RMSProp")
+@click.option("--rmsprop-alpha", default=0.99, type=float, help="Smoothing alpha value used in RMSProp")
 @click.option("--lr", default=0.1, type=float, help="initial learning rate")
 @click.option("--momentum", default=0.9, type=float, metavar="M", help="momentum")
 @click.option(
