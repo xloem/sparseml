@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export CUDA_VISIBLE_DEVICES=1,2
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 N_GPUS=$(($(echo $CUDA_VISIBLE_DEVICES | grep -o "," | wc -l)+1))
 
@@ -20,17 +20,17 @@ TRAIN_SIZE=300
 EVAL_SIZE=384
 
 DATASET=/nm/drive1/ILSVRC
-#DATASET=/nm/drive1/ILSVRC2012/imagenette-160
 BSIZE_PER_GPU=32
 GRAD_ACCUM=4
 
+OPT=rmsprop
+
 for NUM_EPOCHS in 3
 do
-for LR in 1e-5
+for LR in 1e-5 1e-4
 do
 
 ID=$RANDOM
-OPT=rmsprop
 DST_MODEL_NAME=$SRC_MODEL_NAME@$RECIPE_NAME@EP$NUM_EPOCHS@OPT$OPT@LR$LR@ID$ID
 
 RECIPE_ARGS="{\"num_epochs\":${NUM_EPOCHS},\"warmup_lr\":${LR}}"
