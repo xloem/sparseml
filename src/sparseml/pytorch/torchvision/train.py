@@ -558,10 +558,23 @@ def main(args):
     if args.recipe is not None:
         logger.save(args.recipe)
 
-    steps_per_epoch = len(data_loader) / args.gradient_accum_steps
+    n_gpu = (
+        torch.distributed.get_world_size()
+        if torch.distributed.is_initialized()
+        else torch.cuda.device_count()
+    )
+    n_device = n_gpu if n_gpu > 0 else 1
+    total_batch_size = (
+        args.batch_size
+        * n_device
+        * args.gradient_accum_steps
+    )
+    manager_steps_per_epoch = math.ceil(
+        len(data_loader) / total_batch_size
+    )
 
     def log_metrics(tag: str, metrics: utils.MetricLogger, epoch: int, epoch_step: int):
-        step = int(epoch * steps_per_epoch + epoch_step)
+        step = int(epoch * manager_steps_per_epoch + epoch_step)
         for metric_name, smoothed_value in metrics.meters.items():
             logger.log_scalar(
                 f"{tag}/{metric_name}", smoothed_value.global_avg, step=step
@@ -577,7 +590,7 @@ def main(args):
         step_wrapper = manager.modify(
             model,
             optimizer,
-            steps_per_epoch=steps_per_epoch,
+            steps_per_epoch=manager_steps_per_epoch,
             epoch=args.start_epoch,
             wrap_optim=scaler,
         )
