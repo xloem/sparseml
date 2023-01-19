@@ -67,6 +67,29 @@ class SparseDetectionTrainer(DetectionTrainer):
         # with this override
         self._do_train()
 
+    def resume_training(self, ckpt):
+        # NOTE: called at the end of `_setup_train`
+        super().resume_training(ckpt)
+
+        if ckpt is not None:
+            # resume - set manager from checkpoint
+            if "recipe" not in ckpt:
+                raise ValueError("resume is set not checkpoint does not have recipe")
+            self.manager = ScheduledModifierManager.from_yaml(ckpt["recipe"])
+        elif self.args.checkpoint_path is not None:
+            # previous checkpoint
+            if self.args.recipe is not None:
+                self.manager = ScheduledModifierManager.from_yaml(
+                    self.args.recipe, recipe_variables=self.args.recipe_args
+                )
+            # TODO load checkpoint from this path
+            self.checkpoint_manager = ...
+        elif self.args.recipe is not None:
+            # normal training
+            self.manager = ScheduledModifierManager.from_yaml(
+                self.args.recipe, recipe_variables=self.args.recipe_args
+            )
+
     def _setup_train(self, rank, world_size):
         super()._setup_train(rank, world_size)
 
@@ -108,29 +131,6 @@ class SparseDetectionTrainer(DetectionTrainer):
             )
 
         # TODO override LR schedulers
-
-    def resume_training(self, ckpt):
-        # NOTE: called at the end of `_setup_train`
-        super().resume_training(ckpt)
-
-        if ckpt is not None:
-            # resume - set manager from checkpoint
-            if "recipe" not in ckpt:
-                raise ValueError("resume is set not checkpoint does not have recipe")
-            self.manager = ScheduledModifierManager.from_yaml(ckpt["recipe"])
-        elif self.args.checkpoint_path is not None:
-            # previous checkpoint
-            if self.args.recipe is not None:
-                self.manager = ScheduledModifierManager.from_yaml(
-                    self.args.recipe, recipe_variables=self.args.recipe_args
-                )
-            # TODO load checkpoint from this path
-            self.checkpoint_manager = ...
-        elif self.args.recipe is not None:
-            # normal training
-            self.manager = ScheduledModifierManager.from_yaml(
-                self.args.recipe, recipe_variables=self.args.recipe_args
-            )
 
     def callback_on_train_epoch_start(self):
         # NOTE: this callback is registered in __init__
