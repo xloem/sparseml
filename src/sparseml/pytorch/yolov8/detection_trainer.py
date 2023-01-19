@@ -21,6 +21,7 @@ import warnings
 from copy import deepcopy
 from datetime import datetime
 from typing import Optional
+from pathlib import Path
 
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -36,7 +37,7 @@ from sparseml.pytorch.utils.logger import (
 )
 from sparsezoo import Model
 from ultralytics import __version__
-from ultralytics.yolo.utils import DEFAULT_CONFIG, LOGGER
+from ultralytics.yolo.utils import LOGGER
 from ultralytics.yolo.utils.autobatch import check_train_batch_size
 from ultralytics.yolo.utils.dist import (
     USER_CONFIG_DIR,
@@ -50,6 +51,9 @@ from ultralytics.yolo.v8.detect.train import DetectionTrainer
 class _NullLRScheduler:
     def step(self):
         pass
+
+
+DEFAULT_SPARSEML_CONFIG = Path(__file__).resolve().parent / "default.yaml"
 
 
 class SparseDetectionTrainer(DetectionTrainer):
@@ -67,7 +71,7 @@ class SparseDetectionTrainer(DetectionTrainer):
     5. Override `save_model()` to add manager to checkpoints
     """
 
-    def __init__(self, config=DEFAULT_CONFIG, overrides=None):
+    def __init__(self, config=DEFAULT_SPARSEML_CONFIG, overrides=None):
         super().__init__(config, overrides)
 
         self.manager: Optional[ScheduledModifierManager] = None
