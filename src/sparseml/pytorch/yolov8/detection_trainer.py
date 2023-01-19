@@ -74,7 +74,9 @@ class SparseDetectionTrainer(DetectionTrainer):
         self.checkpoint_manager: Optional[ScheduledModifierManager] = None
         self.logger_manager: LoggerManager = LoggerManager(log_python=False)
 
-        self.do_emulated_step = False
+        self.epoch_step: int = 0
+        self.steps_per_epoch: int = 0
+        self.do_emulated_step: bool = False
 
         self.add_callback("on_train_epoch_start", self.callback_on_train_epoch_start)
         self.add_callback("on_train_batch_start", self.callback_on_train_batch_start)
@@ -235,12 +237,12 @@ class SparseDetectionTrainer(DetectionTrainer):
             # Instead, the manager will effectively ignore gradient accumulation,
             # and we will call self.scaler.emulated_step() if the batch was
             # accumulated.
-            steps_per_epoch = len(self.train_loader)  # / self.accumulate
+            self.steps_per_epoch = len(self.train_loader)  # / self.accumulate
 
             self.scaler = self.manager.modify(
                 self.model,
                 self.optimizer,
-                steps_per_epoch=steps_per_epoch,
+                steps_per_epoch=self.steps_per_epoch,
                 epoch=self.start_epoch,
                 wrap_optim=self.scaler,
             )
@@ -252,6 +254,8 @@ class SparseDetectionTrainer(DetectionTrainer):
                 self.scaler._enabled = False
             self.ema = None
 
+        self.epoch_step = 0
+
     def callback_on_train_batch_start(self):
         self.do_emulated_step = True
 
@@ -262,6 +266,10 @@ class SparseDetectionTrainer(DetectionTrainer):
     def callback_on_train_batch_end(self):
         if self.do_emulated_step:
             self.scaler.emulated_step()
+
+        step = self.epoch * self.steps_per_epoch + self.epoch_step
+        for key, value in self.label_loss_items(self.tloss).items():
+            self.logger_manager.log_scalar(key, value, step=step)
 
     def save_model(self):
         epoch = -1 if self.epoch == self.epochs - 1 else self.epoch
