@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import click
-from sparseml.pytorch.yolov8.detection_trainer import SparseDetectionTrainer
+from sparseml.pytorch.yolov8.trainers import SparseDetectionTrainer
 from ultralytics.yolo.engine.model import YOLO
 from ultralytics.yolo.v8.detect.train import DetectionTrainer
 

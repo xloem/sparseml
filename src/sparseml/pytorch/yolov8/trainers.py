@@ -337,16 +337,15 @@ def generate_ddp_command(world_size, trainer):
 
 def generate_ddp_file(trainer):
     # NOTE: adapted from ultralytics.yolo.utils.dist.generate_ddp_file
-    # TODO how to modify this??
-    import_path = ".".join(str(trainer.__class__).split(".")[1:-1])
 
     if not trainer.resume:
         shutil.rmtree(trainer.save_dir)  # remove the save_dir
-    content = f"""config = {dict(trainer.args)} \nif __name__ == "__main__":
-    from ultralytics.{import_path} import {trainer.__class__.__name__}
 
-    trainer = {trainer.__class__.__name__}(config=config)
-    trainer.train()"""
+    content = f"""if __name__ == "__main__":
+    from sparseml.pytorch.yolov8.trainers import {trainer.__class__.__name__}
+    trainer = {trainer.__class__.__name__}(config={dict(trainer.args)})
+    trainer.train()
+"""
     (USER_CONFIG_DIR / "DDP").mkdir(exist_ok=True)
     with tempfile.NamedTemporaryFile(
         prefix="_temp_",
