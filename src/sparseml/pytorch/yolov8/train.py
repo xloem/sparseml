@@ -59,6 +59,12 @@ class SparseYOLO(YOLO):
     ),
 )
 @click.option(
+    "--task",
+    default="detect",
+    type=click.Choice(["detect", "segment", "classify"]),
+    help="Specify task to run.",
+)
+@click.option(
     "--model",
     default="yolov8n.yaml",
     type=str,
@@ -144,6 +150,14 @@ class SparseYOLO(YOLO):
     type=int,
     help="disable mosaic augmentation for final 10 epochs",
 )
+@click.option(
+    "--overlap-mask",
+    default=True,
+    is_flag=True,
+    help="masks should overlap during training",
+)
+@click.option("--mask-ratio", default=4, type=int, help="mask downsample ratio")
+@click.option("--dropout", default=0.0, type=float, help="use dropout regularization")
 @click.option(
     "--lr0",
     default=0.01,
