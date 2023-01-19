@@ -46,6 +46,9 @@ from ultralytics.yolo.utils.dist import (
 )
 from ultralytics.yolo.utils.torch_utils import ModelEMA, de_parallel, one_cycle
 from ultralytics.yolo.v8.detect.train import DetectionTrainer
+from ultralytics.yolo.v8.classify.train import ClassificationTrainer
+from ultralytics.yolo.v8.segment.train import SegmentationTrainer
+from ultralytics.yolo.engine.trainer import BaseTrainer
 
 
 class _NullLRScheduler:
@@ -56,9 +59,9 @@ class _NullLRScheduler:
 DEFAULT_SPARSEML_CONFIG = Path(__file__).resolve().parent / "default.yaml"
 
 
-class SparseDetectionTrainer(DetectionTrainer):
+class SparseTrainer(BaseTrainer):
     """
-    Adds SparseML support to yolov8 DetectionTrainer. This works in the following way:
+    Adds SparseML support to yolov8 BaseTrainer. This works in the following way:
 
     1. Override the DDP command generation that YOLO has built in,
         which assumes the trainer class is under `ultralytics` package.
@@ -73,6 +76,17 @@ class SparseDetectionTrainer(DetectionTrainer):
 
     def __init__(self, config=DEFAULT_SPARSEML_CONFIG, overrides=None):
         super().__init__(config, overrides)
+
+        if isinstance(self.model, str) and self.model.startswith("zoo:"):
+            self.model = download_framework_model_by_recipe_type(Model(self.model))
+
+        if (
+            self.args.checkpoint_path is not None
+            and self.args.checkpoint_path.startswith("zoo:")
+        ):
+            self.args.checkpoint_path = download_framework_model_by_recipe_type(
+                Model(self.args.checkpoint_path)
+            )
 
         self.manager: Optional[ScheduledModifierManager] = None
         self.checkpoint_manager: Optional[ScheduledModifierManager] = None
@@ -89,7 +103,7 @@ class SparseDetectionTrainer(DetectionTrainer):
 
     def train(self):
         # NOTE: overriden to use our version of generate_ddp_command
-        world_size = torch.cuda.device_count()
+        world_size = 1  # torch.cuda.device_count()
         if world_size > 1 and "LOCAL_RANK" not in os.environ:
             command = generate_ddp_command(world_size, self)
             try:
@@ -100,18 +114,6 @@ class SparseDetectionTrainer(DetectionTrainer):
                 ddp_cleanup(command, self)
         else:
             self._do_train(int(os.getenv("RANK", -1)), world_size)
-
-    def setup_model(self):
-        if self.model.startswith("zoo:"):
-            self.model = download_framework_model_by_recipe_type(Model(self.model))
-        if (
-            self.args.checkpoint_path is not None
-            and self.args.checkpoint_path.startswith("zoo:")
-        ):
-            self.args.checkpoint_path = download_framework_model_by_recipe_type(
-                Model(self.args.checkpoint_path)
-            )
-        return super().setup_model()
 
     def _setup_train(self, rank, world_size):
         # NOTE: copied from BaseTrainer._setup_train with the differences:
@@ -313,6 +315,18 @@ class SparseDetectionTrainer(DetectionTrainer):
         # NOTE: this callback is registered in __init__
         if self.manager is not None:
             self.manager.finalize()
+
+
+class SparseDetectionTrainer(SparseTrainer, DetectionTrainer):
+    ...
+
+
+class SparseClassificationTrainer(SparseTrainer, ClassificationTrainer):
+    ...
+
+
+class SparseSegmentationTrainer(SparseTrainer, SegmentationTrainer):
+    ...
 
 
 def generate_ddp_command(world_size, trainer):
