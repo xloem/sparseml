@@ -32,7 +32,6 @@ from sparseml.pytorch.utils.helpers import download_framework_model_by_recipe_ty
 from sparseml.pytorch.utils.logger import (
     LoggerManager,
     PythonLogger,
-    TensorBoardLogger,
     WANDBLogger,
 )
 from sparsezoo import Model
@@ -96,10 +95,16 @@ class SparseTrainer(BaseTrainer):
         self.steps_per_epoch: int = 0
         self.do_emulated_step: bool = False
 
-        self.add_callback("on_train_epoch_start", self.callback_on_train_epoch_start)
-        self.add_callback("on_train_batch_start", self.callback_on_train_batch_start)
-        self.add_callback("on_train_batch_end", self.callback_on_train_batch_end)
-        self.add_callback("teardown", self.callback_teardown)
+        self.add_callback(
+            "on_train_epoch_start", SparseTrainer.callback_on_train_epoch_start
+        )
+        self.add_callback(
+            "on_train_batch_start", SparseTrainer.callback_on_train_batch_start
+        )
+        self.add_callback(
+            "on_train_batch_end", SparseTrainer.callback_on_train_batch_end
+        )
+        self.add_callback("teardown", SparseTrainer.callback_teardown)
 
     def train(self):
         # NOTE: overriden to use our version of generate_ddp_command
@@ -185,13 +190,13 @@ class SparseTrainer(BaseTrainer):
                 lambda x: (1 - x / self.epochs) * (1.0 - self.args.lrf) + self.args.lrf
             )
 
+        self.scheduler = lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.lf)
+        self.scheduler.last_epoch = self.start_epoch - 1  # do not move
+
         # Modification #2 - move scheduler creation to after the manager has been
         # created and override with manager
         if self.manager is not None and self.manager.learning_rate_modifiers:
             self.scheduler = _NullLRScheduler()
-        else:
-            self.scheduler = lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.lf)
-            self.scheduler.last_epoch = self.start_epoch - 1  # do not move
 
     def _initializer_sparseml(self, rank, ckpt):
         if ckpt is not None:
@@ -216,15 +221,15 @@ class SparseTrainer(BaseTrainer):
                 self.args.recipe, recipe_variables=self.args.recipe_args
             )
 
+        if self.manager is not None:
+            self.args.epochs = self.manager.max_epochs
+
         if rank in {0, -1}:
-            loggers = [
-                PythonLogger(logger=LOGGER),
-                TensorBoardLogger(log_path=str(self.save_dir / "sparseml_tb")),
-            ]
+            config = dict(self.args)
+            if self.manager is not None:
+                config["manager"] = str(self.manager)
+            loggers = [PythonLogger(logger=LOGGER)]
             try:
-                config = dict(self.args)
-                if self.manager is not None:
-                    config["manager"] = str(self.manager)
                 loggers.append(WANDBLogger(init_kwargs=dict(config=config)))
             except ImportError:
                 warnings.warn("Unable to import wandb for logging")
