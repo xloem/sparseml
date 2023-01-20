@@ -108,7 +108,7 @@ class SparseTrainer(BaseTrainer):
 
     def train(self):
         # NOTE: overriden to use our version of generate_ddp_command
-        world_size = 1  # torch.cuda.device_count()
+        world_size = torch.cuda.device_count()
         if world_size > 1 and "LOCAL_RANK" not in os.environ:
             command = generate_ddp_command(world_size, self)
             try:
