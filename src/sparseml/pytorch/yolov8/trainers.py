@@ -323,15 +323,15 @@ class SparseTrainer(BaseTrainer):
 
 
 class SparseDetectionTrainer(SparseTrainer, DetectionTrainer):
-    ...
+    pass
 
 
 class SparseClassificationTrainer(SparseTrainer, ClassificationTrainer):
-    ...
+    pass
 
 
 class SparseSegmentationTrainer(SparseTrainer, SegmentationTrainer):
-    ...
+    pass
 
 
 def generate_ddp_command(world_size, trainer):
