@@ -43,6 +43,7 @@ from ultralytics.yolo.utils.torch_utils import ModelEMA, de_parallel
 from ultralytics.yolo.v8.classify.train import ClassificationTrainer
 from ultralytics.yolo.v8.detect.train import DetectionTrainer
 from ultralytics.yolo.v8.segment.train import SegmentationTrainer
+from ultralytics.yolo.engine.exporter import Exporter
 
 
 class _NullLRScheduler:
@@ -331,6 +332,16 @@ class SparseSegmentationTrainer(SparseTrainer, SegmentationTrainer):
     pass
 
 
+class SparseExporter(Exporter):
+    def __init__(self) -> None:
+        super().__init__()
+        # TODO create managers if needed?
+
+    def _export_onnx(self, prefix=...):
+        # TODO use our ModuleExporter
+        return super()._export_onnx(prefix)
+
+
 class SparseYOLO(YOLO):
     def __init__(self, model="yolov8n.yaml", type="v8") -> None:
         model_str = str(model)
@@ -356,6 +367,10 @@ class SparseYOLO(YOLO):
             self.TrainerClass = SparseClassificationTrainer
         elif self.TrainerClass == SegmentationTrainer:
             self.TrainerClass = SparseSegmentationTrainer
+
+    def export(self, **kwargs):
+        # TODO copy YOLO.export but switch Exporter for SparseExporter
+        return super().export(**kwargs)
 
     def _load(self, weights: str):
         if self.is_sparseml_checkpoint:
