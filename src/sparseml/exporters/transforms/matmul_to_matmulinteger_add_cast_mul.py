@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from onnx import ModelProto, TensorProto
-
 from sparseml.exporters.transforms import OnnxTransform
 from sparseml.exporters.transforms.utils import (
     INITIALIZER_MATCH,
@@ -74,7 +73,7 @@ class MatMulToMatMulIntegerAddCastMul(OnnxTransform):
                     INITIALIZER_MATCH,
                     "QuantizeLinear",
                     "DequantizeLinear",
-                    "Transpose",
+                    # "Transpose",
                 ],
             ],
             children_ops=[["Add"]],
@@ -100,7 +99,8 @@ class MatMulToMatMulIntegerAddCastMul(OnnxTransform):
     ):
         matmul = match.node
         (input_quant,) = match.parents[0]
-        weight_init, weight_quant, weight_dequant, transpose = match.parents[1]
+        # weight_init, weight_quant, weight_dequant, transpose = match.parents[1]
+        weight_init, weight_quant, weight_dequant = match.parents[1]
         (add,) = match.children[0]
 
         input_quantize_params = get_quantization_params(
@@ -122,13 +122,13 @@ class MatMulToMatMulIntegerAddCastMul(OnnxTransform):
             bias_initializer=bias_init,
             bias_add_name=add.name,
             target_output=add.output[0],
-            transpose_weight=True,
+            transpose_weight=True,  # False
         )
 
         # Clean up
         self.delete_node_deferred(weight_dequant)
         self.delete_node_deferred(weight_quant)
-        self.delete_node_deferred(transpose)
+        # self.delete_node_deferred(transpose)
         if len(graph.get_node_children(input_quant)) == 1:
             self.delete_node_deferred(input_quant)
         self.delete_node_deferred(matmul)
