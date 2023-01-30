@@ -106,7 +106,7 @@ class MatMulToMatMulInteger(OnnxTransform):
             input_quantize_params=input_quantize_params,
             weight_quantize_params=weight_quantize_params,
             target_output=matmul.output[0],
-            transpose_weight=True,  # False
+            transpose_weight=False,
         )
 
         # Clean up
