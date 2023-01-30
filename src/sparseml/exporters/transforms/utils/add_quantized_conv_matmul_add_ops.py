@@ -25,7 +25,10 @@ from sparseml.exporters.transforms.utils.helpers import (
 )
 
 
-__all__ = ["add_quantized_conv_matmul_add_ops"]
+__all__ = [
+    "add_quantized_conv_matmul_add_ops",
+    "add_quantized_conv_matmul_add_ops_no_bias",
+]
 
 
 def add_quantized_conv_matmul_add_ops(
@@ -109,6 +112,68 @@ def add_quantized_conv_matmul_add_ops(
     return model
 
 
+def add_quantized_conv_matmul_add_ops_no_bias(
+    model: ModelProto,
+    node: NodeProto,
+    input_quantize_node: NodeProto,
+    weight_quantize_node: NodeProto,
+    input_quantize_params: QuantizationParams,
+    weight_quantize_params: QuantizationParams,
+    target_output: str,
+    transpose_weight: bool,
+    output_quantize_node: Optional[NodeProto] = None,
+    output_dequantize_node: Optional[NodeProto] = None,
+) -> ModelProto:
+    """
+    Helper function for conversion of qat parameterized gemms, matmuls, or convs to
+    conv/matmul integer.
+
+    Adds new quantized ops to graph, does not perform any checks or deletions
+    (should be called by the operator main conversion function)
+    """
+
+    # Quantize weights and add to graph
+    quantized_weight_initializer = _quantize_weight_initializer(
+        node, weight_quantize_params, transpose_weight
+    )
+    model.graph.initializer.append(quantized_weight_initializer)
+
+    # Create MatMulInteger/ConvInteger node and add it to graph
+    integer_op_node = _create_integer_op_node(
+        node,
+        input_quantize_node,
+        weight_quantize_node,
+        quantized_weight_initializer.name,
+    )
+    model.graph.node.append(integer_op_node)
+
+    # create output scale initializer for rescale mul op
+    output_scale = input_quantize_params.scale * weight_quantize_params.scale
+    quantized_output_scale_name = "{}.quant.output.scale".format(node.name)
+    output_scale_initializer = numpy_helper.from_array(
+        numpy.asarray(output_scale), name=quantized_output_scale_name
+    )
+    model.graph.initializer.append(output_scale_initializer)
+
+    # create Cast node and add it to graph
+    cast_node = _create_cast_node(
+        quant_add_name=None,
+        input_name=integer_op_node.output[0],
+    )
+    model.graph.node.append(cast_node)
+
+    # create Mul node for rescale
+    mul_node = _create_mul_node(
+        cast_node_output=cast_node.output[0],
+        quantized_bias_scale_name=output_scale_initializer.name,
+        quant_add_name=integer_op_node.name,
+        target_output=target_output,
+    )
+    model.graph.node.append(mul_node)
+
+    return model
+
+
 def _create_mul_node(
     cast_node_output: str,
     quantized_bias_scale_name: str,
@@ -130,13 +195,17 @@ def _create_mul_node(
 
 
 def _create_cast_node(
-    quant_add_name: str, output_quantize_node: Optional[NodeProto] = None
+    quant_add_name: str,
+    output_quantize_node: Optional[NodeProto] = None,
+    input_name: Optional[str] = None,
 ) -> NodeProto:
     quant_add_output = (
         output_quantize_node.output[0]
         if output_quantize_node
         else f"{quant_add_name}_output"
     )
+    if input_name:
+        quant_add_output = input_name
 
     cast_node_name = "{}_cast".format(quant_add_name)
     cast_node_output = "{}_cast".format(quant_add_output)
