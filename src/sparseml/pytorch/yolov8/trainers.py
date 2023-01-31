@@ -203,6 +203,10 @@ class SparseTrainer(BaseTrainer):
                 self.checkpoint_manager = ScheduledModifierManager.from_yaml(
                     old_ckpt["recipe"]
                 )
+                self.checkpoint_manager.apply_structure(
+                    self.model,
+                    epoch=old_ckpt["epoch"] if old_ckpt["epoch"] >= 0 else float("inf"),
+                )
         elif self.args.recipe is not None:
             # normal training
             self.manager = ScheduledModifierManager.from_yaml(
