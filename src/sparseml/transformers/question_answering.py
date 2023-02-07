@@ -32,8 +32,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import datasets
+import numpy
 import transformers
 from datasets import load_dataset, load_metric
+from sklearn.model_selection import StratifiedShuffleSplit
 from transformers import (
     AutoConfig,
     AutoTokenizer,
@@ -274,6 +276,14 @@ class DataTrainingArguments:
         default=0,
         metadata={"help": "Number of samples (inputs/outputs) to export during eval."},
     )
+    validation_ratio: Optional[float] = field(
+        default=None,
+        metadata={"help": "Percentage of the training data to be used as validation."},
+    )
+    eval_on_test: bool = field(
+        default=False,
+        metadata={"help": "Evaluate the test dataset."},
+    )
 
     def __post_init__(self):
         if (
@@ -430,7 +440,6 @@ def main(**kwargs):
         do_predict=training_args.do_predict,
         main_process_func=training_args.main_process_first,
     )
-
     train_dataset = tokenized_datasets.get("train")
     eval_dataset, eval_examples = tokenized_datasets.get("validation"), examples.get(
         "validation"
@@ -492,6 +501,10 @@ def main(**kwargs):
 
     def compute_metrics(p: EvalPrediction):
         return metric.compute(predictions=p.predictions, references=p.label_ids)
+
+    import pdb
+
+    pdb.set_trace()
 
     # Initialize our Trainer
     trainer = QuestionAnsweringTrainer(
@@ -742,13 +755,21 @@ def _get_tokenized_datasets_and_examples(
     if do_train:
         if "train" not in raw_datasets:
             raise ValueError("--do_train requires a train dataset")
-        train_dataset = raw_datasets["train"]
+        train_examples = raw_datasets["train"]
+        if (
+            make_eval_dataset
+            and "validation" not in raw_datasets
+            and data_args.validation_ratio is not None
+        ):
+            train_examples, eval_examples = _split_train_val(
+                train_examples, data_args.validation_ratio, data_args
+            )
         if data_args.max_train_samples is not None:
             # We will select sample from whole data if argument is specified
-            train_dataset = train_dataset.select(range(data_args.max_train_samples))
+            train_dataset = train_examples.select(range(data_args.max_train_samples))
         # Create train feature from dataset
         with main_process_func(desc="train dataset map pre-processing"):
-            train_dataset = train_dataset.map(
+            train_dataset = train_examples.map(
                 prepare_train_features,
                 batched=True,
                 num_proc=data_args.preprocessing_num_workers,
@@ -815,11 +836,18 @@ def _get_tokenized_datasets_and_examples(
 
         return tokenized_examples
 
-    eval_examples = None
     if make_eval_dataset:
         if "validation" not in raw_datasets:
-            raise ValueError("--do_eval requires a validation dataset")
-        eval_examples = raw_datasets["validation"]
+            if data_args.validation_ratio is None:
+                raise ValueError(
+                    "--do_eval requires a validation dataset or validation_ratio specified"
+                )
+            else:
+                assert (
+                    eval_examples is not None
+                ), "Validation dataset has not been splitted from training set as expected"
+        else:
+            eval_examples = raw_datasets["validation"]
         if data_args.max_eval_samples is not None:
             # We will select sample from whole data
             eval_examples = eval_examples.select(range(data_args.max_eval_samples))
@@ -873,6 +901,51 @@ def _get_tokenized_datasets_and_examples(
 
     examples = {"train": None, "validation": eval_examples, "test": predict_examples}
     return tokenized_datasets, examples
+
+
+def _pre_split(train_dataset, data_args):
+    def _add_category(example):
+        id_str = example["id"]
+        example["category"] = id_str[id_str.rindex("__") + 2 : id_str.rindex("_")]
+        return example
+
+    if data_args.dataset_name == "cuad":
+        train_dataset = train_dataset.map(_add_category)
+
+    return train_dataset
+
+
+def _post_split(train_ds, val_ds, data_args):
+    if data_args.dataset_name == "cuad":
+        train_ds = train_ds.remove_columns("category")
+        val_ds = val_ds.remove_columns("category")
+
+    return train_ds, val_ds
+
+
+def _split_train_val(train_dataset, val_ratio, data_args):
+
+    train_dataset = _pre_split(train_dataset, data_args)
+
+    # Fixed random seed to make split consistent across runs with the same ratio
+    seed = 42
+    try:
+        ds = train_dataset.train_test_split(
+            test_size=val_ratio, stratify_by_column="category", seed=seed
+        )
+        train_ds = ds.pop("train")
+        val_ds = ds.pop("test")
+    except TypeError:
+        X = list(range(len(train_dataset)))
+        y = train_dataset["category"]
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=val_ratio, random_state=seed)
+        for train_indices, test_indices in sss.split(X, y):
+            train_ds = train_dataset.select(train_indices)
+            val_ds = train_dataset.select(test_indices)
+
+    train_ds, val_ds = _post_split(train_ds, val_ds, data_args)
+
+    return train_ds, val_ds
 
 
 def _get_column_names(
