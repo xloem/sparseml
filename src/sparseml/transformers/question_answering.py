@@ -274,6 +274,10 @@ class DataTrainingArguments:
         default=0,
         metadata={"help": "Number of samples (inputs/outputs) to export during eval."},
     )
+    metrics: str = field(
+        default="squad",
+        metadata={"help": "Name of the metric given to `datasets.load_metric`."},
+    )
 
     def __post_init__(self):
         if (
@@ -473,22 +477,18 @@ def main(**kwargs):
             prefix=stage,
         )
         # Format the result to the format the metric expects.
-        if data_args.version_2_with_negative:
-            formatted_predictions = [
-                {"id": k, "prediction_text": v, "no_answer_probability": 0.0}
-                for k, v in predictions.items()
-            ]
-        else:
-            formatted_predictions = [
-                {"id": k, "prediction_text": v} for k, v in predictions.items()
-            ]
-
+        formatted_predictions = [
+            {"id": k, "prediction_text": [v]} for k, v in predictions.items()
+        ]
         references = [
             {"id": ex["id"], "answers": ex[answer_column_name]} for ex in examples
         ]
         return EvalPrediction(predictions=formatted_predictions, label_ids=references)
 
-    metric = load_metric("squad_v2" if data_args.version_2_with_negative else "squad")
+    metric_name = data_args.metrics
+    if metric_name == "squad" and data_args.version_2_with_negative:
+        metric_name = "squad_v2"
+    metric = load_metric(metric_name)
 
     def compute_metrics(p: EvalPrediction):
         return metric.compute(predictions=p.predictions, references=p.label_ids)
@@ -817,9 +817,9 @@ def _get_tokenized_datasets_and_examples(
 
     eval_examples = None
     if make_eval_dataset:
-        if "validation" not in raw_datasets:
-            raise ValueError("--do_eval requires a validation dataset")
-        eval_examples = raw_datasets["validation"]
+        # if "validation" not in raw_datasets:
+        #     raise ValueError("--do_eval requires a validation dataset")
+        eval_examples = raw_datasets.get("validation", None) or raw_datasets["test"]
         if data_args.max_eval_samples is not None:
             # We will select sample from whole data
             eval_examples = eval_examples.select(range(data_args.max_eval_samples))
@@ -833,10 +833,10 @@ def _get_tokenized_datasets_and_examples(
                 load_from_cache_file=not data_args.overwrite_cache,
                 desc="Running tokenizer on validation dataset",
             )
-        if data_args.max_eval_samples is not None:
-            # During Feature creation dataset samples might increase, we will select
-            # required samples again
-            eval_dataset = eval_dataset.select(range(data_args.max_eval_samples))
+        # if data_args.max_eval_samples is not None:
+        #     # During Feature creation dataset samples might increase, we will select
+        #     # required samples again
+        #     eval_dataset = eval_dataset.select(range(data_args.max_eval_samples))
 
     predict_examples = None
     if do_predict:
