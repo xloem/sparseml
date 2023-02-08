@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import datasets
+from sparseml.transformers.utils.cuad_eval import CUAD
 import transformers
 from datasets import load_dataset, load_metric
 from transformers import (
@@ -478,17 +479,18 @@ def main(**kwargs):
         )
         # Format the result to the format the metric expects.
         formatted_predictions = [
-            {"id": k, "prediction_text": [v]} for k, v in predictions.items()
+            {"id": k, "prediction_text": vs} for k, vs in predictions.items()
         ]
         references = [
             {"id": ex["id"], "answers": ex[answer_column_name]} for ex in examples
         ]
         return EvalPrediction(predictions=formatted_predictions, label_ids=references)
 
-    metric_name = data_args.metrics
-    if metric_name == "squad" and data_args.version_2_with_negative:
-        metric_name = "squad_v2"
-    metric = load_metric(metric_name)
+    # metric_name = data_args.metrics
+    # if metric_name == "squad" and data_args.version_2_with_negative:
+    #     metric_name = "squad_v2"
+    # metric = load_metric(metric_name)
+    metric = CUAD()
 
     def compute_metrics(p: EvalPrediction):
         return metric.compute(predictions=p.predictions, references=p.label_ids)
@@ -756,10 +758,10 @@ def _get_tokenized_datasets_and_examples(
                 load_from_cache_file=not data_args.overwrite_cache,
                 desc="Running tokenizer on train dataset",
             )
-        if data_args.max_train_samples is not None:
-            # Number of samples might increase during Feature Creation, We select only
-            # specified max samples
-            train_dataset = train_dataset.select(range(data_args.max_train_samples))
+        # if data_args.max_train_samples is not None:
+        #     # Number of samples might increase during Feature Creation, We select only
+        #     # specified max samples
+        #     train_dataset = train_dataset.select(range(data_args.max_train_samples))
 
     # Validation preprocessing
     def prepare_validation_features(examples):

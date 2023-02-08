@@ -446,6 +446,7 @@ def postprocess_qa_predictions(
                 all_predictions[example["id"]] = best_non_null_pred["text"]
 
         # Make `predictions` JSON-serializable by casting np.float back to float.
+        assert example["id"] not in all_nbest_json
         all_nbest_json[example["id"]] = [
             {
                 k: (
@@ -490,4 +491,4 @@ def postprocess_qa_predictions(
             with open(null_odds_file, "w") as writer:
                 writer.write(json.dumps(scores_diff_json, indent=4) + "\n")
 
-    return all_predictions
+    return all_nbest_json
