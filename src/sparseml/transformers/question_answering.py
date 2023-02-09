@@ -493,7 +493,7 @@ def main(**kwargs):
             data_args.n_best_size,
             data_args.max_answer_length,
             False,
-            None,
+            training_args.output_dir + "/predictions.json",
             training_args.output_dir + "/nbest.json",
             None,
             False,

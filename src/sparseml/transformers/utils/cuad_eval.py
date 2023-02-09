@@ -282,7 +282,7 @@ class CUAD(datasets.Metric):
                     }
                 )
             pred_dict[prediction["id"]] = preds
-        gt_dict = {ref["id"]: ref["answers"] for ref in references}
+        gt_dict = {ref["id"]: ref["answers"]["text"] for ref in references}
         score = get_results(gt_dict=gt_dict, pred_dict=pred_dict)
         return score
 
