@@ -33,7 +33,6 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import datasets
-from sparseml.transformers.utils.cuad_eval import CUAD
 import transformers
 from datasets import load_dataset, load_metric
 from transformers import (
@@ -43,14 +42,14 @@ from transformers import (
     EvalPrediction,
     HfArgumentParser,
     PreTrainedTokenizerFast,
+    SquadExample,
+    SquadV2Processor,
     default_data_collator,
     set_seed,
     squad_convert_examples_to_features,
-    SquadV2Processor,
-    SquadExample,
 )
-from transformers.data.processors.squad import SquadResult
 from transformers.data.metrics.squad_metrics import compute_predictions_logits
+from transformers.data.processors.squad import SquadResult
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
@@ -62,6 +61,7 @@ from sparseml.transformers.sparsification import (
     postprocess_qa_predictions,
 )
 from sparseml.transformers.utils import SparseAutoModel, get_shared_tokenizer_src
+from sparseml.transformers.utils.cuad_eval import CUAD
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your
