@@ -379,7 +379,7 @@ def postprocess_qa_predictions(
                             "end_logit": end_logits[end_index],
                         }
                     )
-        if version_2_with_negative:
+        if version_2_with_negative and min_null_prediction is not None:
             # Add the minimum null prediction
             prelim_predictions.append(min_null_prediction)
             null_score = min_null_prediction["score"]
@@ -391,8 +391,10 @@ def postprocess_qa_predictions(
 
         # Add back the minimum null prediction if it was removed because of its
         # low score.
-        if version_2_with_negative and not any(
-            p["offsets"] == (0, 0) for p in predictions
+        if (
+            version_2_with_negative
+            and min_null_prediction is not None
+            and not any(p["offsets"] == (0, 0) for p in predictions)
         ):
             predictions.append(min_null_prediction)
 

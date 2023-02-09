@@ -24,6 +24,7 @@ Fine-tuning the library models for question answering integrated with sparseml
 # You can also adapt this script on your own question answering task.
 # Pointers for this are left as comments.
 
+import json
 import logging
 import os
 import sys
@@ -44,7 +45,12 @@ from transformers import (
     PreTrainedTokenizerFast,
     default_data_collator,
     set_seed,
+    squad_convert_examples_to_features,
+    SquadV2Processor,
+    SquadExample,
 )
+from transformers.data.processors.squad import SquadResult
+from transformers.data.metrics.squad_metrics import compute_predictions_logits
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
@@ -410,19 +416,19 @@ def main(**kwargs):
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_src,
         cache_dir=model_args.cache_dir,
-        use_fast=True,
+        use_fast=False,
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
 
-    # Tokenizer check: this script requires a fast tokenizer.
-    if not isinstance(tokenizer, PreTrainedTokenizerFast):
-        raise ValueError(
-            "This example script only works for models that have a fast tokenizer. "
-            "Checkout the big table of models at "
-            "https://huggingface.co/transformers/index.html#supported-frameworks to "
-            "find the model types that meet this requirement"
-        )
+    # # Tokenizer check: this script requires a fast tokenizer.
+    # if not isinstance(tokenizer, PreTrainedTokenizerFast):
+    #     raise ValueError(
+    #         "This example script only works for models that have a fast tokenizer. "
+    #         "Checkout the big table of models at "
+    #         "https://huggingface.co/transformers/index.html#supported-frameworks to "
+    #         "find the model types that meet this requirement"
+    #     )
 
     raw_datasets = _get_raw_dataset(data_args=data_args, cache_dir=model_args.cache_dir)
     make_eval_dataset = training_args.do_eval or data_args.num_export_samples > 0
@@ -444,15 +450,22 @@ def main(**kwargs):
         "test"
     )
 
+    eval_features = examples["squad"]
+
     # Data collator
     # We have already padded to max length if the corresponding flag is True,
     # otherwise we need to pad in the data collator.
-    data_collator = (
-        default_data_collator
-        if data_args.pad_to_max_length
-        else DataCollatorWithPadding(
-            tokenizer, pad_to_multiple_of=8 if training_args.fp16 else None
-        )
+    # data_collator = (
+    #     default_data_collator
+    #     if data_args.pad_to_max_length
+    #     else DataCollatorWithPadding(
+    #         tokenizer, pad_to_multiple_of=8 if training_args.fp16 else None
+    #     )
+    # )
+    data_collator = DataCollatorWithPadding(
+        tokenizer,
+        pad_to_multiple_of=8 if training_args.fp16 else None,
+        padding="max_length",
     )
     column_names = _get_column_names(
         raw_datasets=raw_datasets,
@@ -463,27 +476,50 @@ def main(**kwargs):
 
     # Post-processing:
     def post_processing_function(examples, features, predictions, stage="eval"):
+        results = [
+            SquadResult(
+                eval_features[i].unique_id,
+                list(map(float, p)),
+                list(map(float, predictions[1][i])),
+            )
+            for i, p in enumerate(predictions[0])
+        ]
         # Post-processing: we match the start logits and end
         # logits to answers in the original context.
-        predictions = postprocess_qa_predictions(
-            examples=examples,
-            features=features,
-            predictions=predictions,
-            version_2_with_negative=data_args.version_2_with_negative,
-            n_best_size=data_args.n_best_size,
-            max_answer_length=data_args.max_answer_length,
-            null_score_diff_threshold=data_args.null_score_diff_threshold,
-            output_dir=training_args.output_dir,
-            log_level=log_level,
-            prefix=stage,
+        _ = compute_predictions_logits(
+            examples,
+            eval_features,
+            results,
+            data_args.n_best_size,
+            data_args.max_answer_length,
+            False,
+            None,
+            training_args.output_dir + "/nbest.json",
+            None,
+            False,
+            data_args.version_2_with_negative,
+            data_args.null_score_diff_threshold,
+            tokenizer,
         )
+        with open(training_args.output_dir + "/nbest.json") as fp:
+            predictions = json.load(fp)
+        # predictions = postprocess_qa_predictions(
+        #     examples=examples,
+        #     features=features,
+        #     predictions=predictions,
+        #     version_2_with_negative=data_args.version_2_with_negative,
+        #     n_best_size=data_args.n_best_size,
+        #     max_answer_length=data_args.max_answer_length,
+        #     null_score_diff_threshold=data_args.null_score_diff_threshold,
+        #     output_dir=training_args.output_dir,
+        #     log_level=log_level,
+        #     prefix=stage,
+        # )
         # Format the result to the format the metric expects.
         formatted_predictions = [
             {"id": k, "prediction_text": vs} for k, vs in predictions.items()
         ]
-        references = [
-            {"id": ex["id"], "answers": ex[answer_column_name]} for ex in examples
-        ]
+        references = [{"id": ex.qas_id, "answers": ex.answers} for ex in examples]
         return EvalPrediction(predictions=formatted_predictions, label_ids=references)
 
     # metric_name = data_args.metrics
@@ -748,16 +784,56 @@ def _get_tokenized_datasets_and_examples(
         if data_args.max_train_samples is not None:
             # We will select sample from whole data if argument is specified
             train_dataset = train_dataset.select(range(data_args.max_train_samples))
-        # Create train feature from dataset
-        with main_process_func(desc="train dataset map pre-processing"):
-            train_dataset = train_dataset.map(
-                prepare_train_features,
-                batched=True,
-                num_proc=data_args.preprocessing_num_workers,
-                remove_columns=column_names,
-                load_from_cache_file=not data_args.overwrite_cache,
-                desc="Running tokenizer on train dataset",
+        examples = []
+        for ex in train_dataset:
+            answers = ex["answers"]
+            can = len(answers["text"]) > 0
+            examples.append(
+                SquadExample(
+                    qas_id=ex["id"],
+                    question_text=ex["question"],
+                    context_text=ex["context"],
+                    answer_text=answers["text"][0] if can else None,
+                    start_position_character=answers["answer_start"][0]
+                    if can
+                    else None,
+                    title=ex["title"],
+                    answers=answers,
+                    is_impossible=not can,
+                )
             )
+        features, train_dataset = squad_convert_examples_to_features(
+            examples,
+            tokenizer,
+            data_args.max_seq_length,
+            data_args.doc_stride,
+            max_query_length=64,
+            is_training=True,
+            padding_strategy="max_length",
+            return_dataset="pt",
+            threads=data_args.preprocessing_num_workers,
+        )
+        train_dataset = [
+            {
+                "input_ids": ex[0],
+                "attention_mask": ex[1],
+                "token_type_ids": ex[2],
+                "start_positions": ex[3],
+                "end_positions": ex[4],
+            }
+            for ex in train_dataset
+        ]
+
+        # Create train feature from dataset
+        # with main_process_func(desc="train dataset map pre-processing"):
+        # train_dataset = train_dataset.map(
+        #     prepare_train_features,
+        #     batched=True,
+        #     num_proc=data_args.preprocessing_num_workers,
+        #     remove_columns=column_names,
+        #     load_from_cache_file=not data_args.overwrite_cache,
+        #     desc="Running tokenizer on train dataset",
+        # )
         # if data_args.max_train_samples is not None:
         #     # Number of samples might increase during Feature Creation, We select only
         #     # specified max samples
@@ -825,16 +901,57 @@ def _get_tokenized_datasets_and_examples(
         if data_args.max_eval_samples is not None:
             # We will select sample from whole data
             eval_examples = eval_examples.select(range(data_args.max_eval_samples))
-        # Validation Feature Creation
-        with main_process_func(desc="validation dataset map pre-processing"):
-            eval_dataset = eval_examples.map(
-                prepare_validation_features,
-                batched=True,
-                num_proc=data_args.preprocessing_num_workers,
-                remove_columns=column_names,
-                load_from_cache_file=not data_args.overwrite_cache,
-                desc="Running tokenizer on validation dataset",
+
+        squad_examples = []
+        for ex in eval_examples:
+            answers = ex["answers"]
+            can = len(answers["text"]) > 0
+            squad_examples.append(
+                SquadExample(
+                    qas_id=ex["id"],
+                    question_text=ex["question"],
+                    context_text=ex["context"],
+                    answer_text=answers["text"][0] if can else None,
+                    start_position_character=answers["answer_start"][0]
+                    if can
+                    else None,
+                    title=ex["title"],
+                    answers=answers,
+                    is_impossible=not can,
+                )
             )
+        squad_features, _ = squad_convert_examples_to_features(
+            squad_examples,
+            tokenizer,
+            data_args.max_seq_length,
+            data_args.doc_stride,
+            max_query_length=64,
+            is_training=False,
+            return_dataset="pt",
+            padding_strategy="max_length",
+            threads=data_args.preprocessing_num_workers,
+        )
+        eval_dataset = [
+            {
+                "example_id": ex.qas_id,
+                "input_ids": ex.input_ids,
+                "attention_mask": ex.attention_mask,
+                "token_type_ids": ex.token_type_ids,
+                "token_is_max_context": ex.token_is_max_context,
+            }
+            for ex in squad_features
+        ]
+        eval_examples = squad_examples
+        # Validation Feature Creation
+        # with main_process_func(desc="validation dataset map pre-processing"):
+        # eval_dataset = eval_examples.map(
+        #     prepare_validation_features,
+        #     batched=True,
+        #     num_proc=data_args.preprocessing_num_workers,
+        #     remove_columns=column_names,
+        #     load_from_cache_file=not data_args.overwrite_cache,
+        #     desc="Running tokenizer on validation dataset",
+        # )
         # if data_args.max_eval_samples is not None:
         #     # During Feature creation dataset samples might increase, we will select
         #     # required samples again
@@ -873,7 +990,12 @@ def _get_tokenized_datasets_and_examples(
         "test": predict_dataset,
     }
 
-    examples = {"train": None, "validation": eval_examples, "test": predict_examples}
+    examples = {
+        "train": None,
+        "validation": eval_examples,
+        "test": predict_examples,
+        "squad": squad_features,
+    }
     return tokenized_datasets, examples
 
 
