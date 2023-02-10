@@ -427,16 +427,21 @@ def postprocess_qa_predictions(
         else:
             # Otherwise we first need to find the best non-empty prediction.
             i = 0
-            while predictions[i]["text"] == "":
+            while i < len(predictions) and predictions[i]["text"] == "":
                 i += 1
-            best_non_null_pred = predictions[i]
 
-            # Then we compare to the null prediction using the threshold.
-            score_diff = (
-                null_score
-                - best_non_null_pred["start_logit"]
-                - best_non_null_pred["end_logit"]
-            )
+            if i < len(predictions):
+                best_non_null_pred = predictions[i]
+
+                # Then we compare to the null prediction using the threshold.
+                score_diff = (
+                    null_score
+                    - best_non_null_pred["start_logit"]
+                    - best_non_null_pred["end_logit"]
+                )
+            else:
+                score_diff = float("inf")
+
             scores_diff_json[example["id"]] = float(
                 score_diff
             )  # To be JSON-serializable.
