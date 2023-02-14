@@ -34,8 +34,9 @@ from typing import Optional
 import datasets
 import numpy
 import transformers
-from datasets import load_dataset, load_metric
+from datasets import concatenate_datasets,load_dataset, load_metric
 from sklearn.model_selection import StratifiedShuffleSplit
+from torch import utils as torch_utils
 from transformers import (
     AutoConfig,
     AutoTokenizer,
@@ -178,6 +179,10 @@ class DataTrainingArguments:
                 "(a text file)."
             ),
         },
+    )
+    train_ratio: Optional[float] = field(
+        default=None,
+        metadata={"help": "Percentage of the training data to be used for training."},
     )
     validation_ratio: Optional[float] = field(
         default=None,
@@ -756,6 +761,7 @@ def _get_tokenized_datasets_and_examples(
     if do_train:
         if "train" not in raw_datasets:
             raise ValueError("--do_train requires a train dataset")
+
         train_examples = raw_datasets["train"]
         if (
             make_eval_dataset
@@ -765,7 +771,11 @@ def _get_tokenized_datasets_and_examples(
             train_examples, eval_examples = _split_train_val(
                 train_examples, data_args.validation_ratio, data_args
             )
-        if data_args.max_train_samples is not None:
+        if data_args.train_ratio is not None:
+            train_examples, _ = _split_train_val(
+                train_examples, 1.0 - data_args.train_ratio, data_args
+            )
+        elif data_args.max_train_samples is not None:
             # We will select sample from whole data if argument is specified
             train_dataset = train_examples.select(range(data_args.max_train_samples))
         # Create train feature from dataset
@@ -778,6 +788,9 @@ def _get_tokenized_datasets_and_examples(
                 load_from_cache_file=not data_args.overwrite_cache,
                 desc="Running tokenizer on train dataset",
             )
+
+        train_dataset = _rebalance_train_dataset(train_dataset)        
+
         # if data_args.max_train_samples is not None:
         #     # Number of samples might increase during Feature Creation, We select only
         #     # specified max samples
@@ -906,6 +919,19 @@ def _get_tokenized_datasets_and_examples(
     return tokenized_datasets, examples
 
 
+def _rebalance_train_dataset(train_dataset):
+    # Rebalance the training dataset
+    positives = train_dataset.filter(
+        lambda example: example["start_positions"] < example["end_positions"],
+        num_proc=64,
+    )
+    n_pos, n_neg = len(positives), len(train_dataset) - len(positives)
+    balanced_dataset = train_dataset.filter(
+        lambda ex: (ex["start_positions"] < ex["end_positions"]) or (numpy.random.random() < n_pos / n_neg),
+        num_proc=64
+    )
+    return balanced_dataset
+
 def _pre_split(train_dataset, data_args):
     def _add_category(example):
         id_str = example["id"]
@@ -927,7 +953,7 @@ def _post_split(train_ds, val_ds, data_args):
 
 
 def _split_train_val(train_dataset, val_ratio, data_args):
-
+    assert val_ratio is not None
     train_dataset = _pre_split(train_dataset, data_args)
 
     # Fixed random seed to make split consistent across runs with the same ratio
