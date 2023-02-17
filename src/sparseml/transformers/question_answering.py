@@ -178,6 +178,10 @@ class DataTrainingArguments:
             ),
         },
     )
+    neg_pos_ratio: Optional[float] = field(
+        default=None,
+        metadata={"help": "Ratio of tokenized examples without vs with answers."},
+    )
     validation_ratio: Optional[float] = field(
         default=None,
         metadata={"help": "Percentage of the training data to be used as validation."},
@@ -777,6 +781,14 @@ def _get_tokenized_datasets_and_examples(
                 load_from_cache_file=not data_args.overwrite_cache,
                 desc="Running tokenizer on train dataset",
             )
+
+        neg_pos_ratio = (
+            1.0 if data_args.neg_pos_ratio is None else data_args.neg_pos_ratio
+        )
+        train_dataset = _rebalance_train_dataset(
+            train_dataset, neg_pos_ratio=neg_pos_ratio
+        )
+
         if data_args.max_train_samples is not None:
             # Number of samples might increase during Feature Creation, We select only
             # specified max samples
@@ -903,6 +915,21 @@ def _get_tokenized_datasets_and_examples(
 
     examples = {"train": None, "validation": eval_examples, "test": predict_examples}
     return tokenized_datasets, examples
+
+
+def _rebalance_train_dataset(train_dataset, neg_pos_ratio=1.0):
+    # Rebalance the training dataset
+    positives = train_dataset.filter(
+        lambda example: example["start_positions"] < example["end_positions"],
+        num_proc=64,
+    )
+    n_pos, n_neg = len(positives), len(train_dataset) - len(positives)
+    ds = train_dataset.filter(
+        lambda ex: (ex["start_positions"] < ex["end_positions"])
+        or (numpy.random.random() < neg_pos_ratio * n_pos / n_neg),
+        num_proc=64,
+    )
+    return ds
 
 
 def _pre_split(train_dataset, data_args):
