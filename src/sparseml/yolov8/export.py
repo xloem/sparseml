@@ -48,6 +48,12 @@ from sparseml.yolov8.trainers import SparseYOLO
     "the model.",
 )
 @click.option(
+    "--dynamic",
+    default=False,
+    type=int,
+    help="Whether to export the model with dynamic axes."
+)
+@click.option(
     "--one-shot",
     default=None,
     type=str,

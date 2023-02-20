@@ -53,6 +53,7 @@ from ultralytics.yolo.utils.torch_utils import de_parallel, smart_inference_mode
 from ultralytics.yolo.v8.classify import ClassificationTrainer, ClassificationValidator
 from ultralytics.yolo.v8.detect import DetectionTrainer, DetectionValidator
 from ultralytics.yolo.v8.segment import SegmentationTrainer, SegmentationValidator
+from sparseml.yolov8.utils import is_dynamic_axes
 
 
 class _NullLRScheduler:
@@ -557,6 +558,7 @@ class SparseYOLO(YOLO):
             name=name,
             input_names=["images"],
             convert_qat=True,
+            dynamic_axes= is_dynamic_axes(model=self.model, dynamic = args['dynamic']),
             # ultralytics-specific argument
             do_constant_folding=True,
             output_names=["output0", "output1"]
