@@ -49,6 +49,7 @@ from sparseml.pytorch.utils import (
 from sparseml.transformers.utils import SparseAutoModel
 from sparseml.transformers.utils.helpers import RECIPE_NAME
 
+DEBUG = True
 
 __all__ = [
     "RecipeManagerTrainerInterface",

@@ -37,6 +37,7 @@ from sparseml.transformers.sparsification.trainer import (
     TransformersTrainer,
 )
 
+from sparseml.transformers.utils import squad_evaluate
 
 if is_torch_tpu_available():
     import torch_xla.core.xla_model as xm
@@ -48,6 +49,7 @@ __all__ = [
     "postprocess_qa_predictions",
 ]
 
+DEBUG = True
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -102,13 +104,21 @@ class _QuestionAnsweringTrainer(TransformersTrainer):
                 prediction_loss_only=True if compute_metrics is None else None,
                 ignore_keys=ignore_keys,
             )
+
         finally:
             self.compute_metrics = compute_metrics
 
         if self.post_process_function is not None and self.compute_metrics is not None:
-            eval_preds = self.post_process_function(
+
+            import pdb; pdb.set_trace()
+            eval_preds, my_preds = self.post_process_function(
                 eval_examples, eval_dataset, output.predictions
             )
+
+            my_results = squad_evaluate(eval_examples, my_preds)
+            print(my_results)
+
+            
             metrics = self.compute_metrics(eval_preds)
 
             # Prefix all keys with metric_key_prefix + '_'
