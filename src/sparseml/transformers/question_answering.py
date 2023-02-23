@@ -34,7 +34,6 @@ from typing import Optional
 
 import datasets
 import numpy
-
 import transformers
 from datasets import load_dataset, load_metric
 from sklearn.model_selection import StratifiedShuffleSplit
@@ -498,7 +497,7 @@ def main(**kwargs):
         ]
         # Post-processing: we match the start logits and end
         # logits to answers in the original context.
-        _ = compute_predictions_logits(
+        my_preds = compute_predictions_logits(
             examples,
             eval_features,
             results,
@@ -532,7 +531,10 @@ def main(**kwargs):
             {"id": k, "prediction_text": vs} for k, vs in predictions.items()
         ]
         references = [{"id": ex.qas_id, "answers": ex.answers} for ex in examples]
-        return EvalPrediction(predictions=formatted_predictions, label_ids=references)
+        return (
+            EvalPrediction(predictions=formatted_predictions, label_ids=references),
+            my_preds,
+        )
 
     # metric_name = data_args.metrics
     # if metric_name == "squad" and data_args.version_2_with_negative:

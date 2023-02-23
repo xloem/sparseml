@@ -36,6 +36,7 @@ from sparseml.transformers.sparsification.trainer import (
     TrainerInterface,
     TransformersTrainer,
 )
+from sparseml.transformers.utils import squad_evaluate
 
 
 if is_torch_tpu_available():
@@ -106,9 +107,12 @@ class _QuestionAnsweringTrainer(TransformersTrainer):
             self.compute_metrics = compute_metrics
 
         if self.post_process_function is not None and self.compute_metrics is not None:
-            eval_preds = self.post_process_function(
+            eval_preds, my_preds = self.post_process_function(
                 eval_examples, eval_dataset, output.predictions
             )
+            squad_metrics = squad_evaluate(eval_examples, my_preds)
+            self.log(squad_metrics)
+
             metrics = self.compute_metrics(eval_preds)
 
             # Prefix all keys with metric_key_prefix + '_'
