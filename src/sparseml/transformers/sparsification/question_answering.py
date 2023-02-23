@@ -49,8 +49,6 @@ __all__ = [
     "postprocess_qa_predictions",
 ]
 
-DEBUG = True
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -109,16 +107,12 @@ class _QuestionAnsweringTrainer(TransformersTrainer):
             self.compute_metrics = compute_metrics
 
         if self.post_process_function is not None and self.compute_metrics is not None:
-
-            import pdb; pdb.set_trace()
             eval_preds, my_preds = self.post_process_function(
                 eval_examples, eval_dataset, output.predictions
             )
+            squad_metrics = squad_evaluate(eval_examples, my_preds)
+            self.log(squad_metrics)
 
-            my_results = squad_evaluate(eval_examples, my_preds)
-            print(my_results)
-
-            
             metrics = self.compute_metrics(eval_preds)
 
             # Prefix all keys with metric_key_prefix + '_'

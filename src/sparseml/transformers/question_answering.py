@@ -66,7 +66,7 @@ from sparseml.transformers.sparsification import (
 from sparseml.transformers.utils import SparseAutoModel, get_shared_tokenizer_src
 from sparseml.transformers.utils.cuad_eval import CUAD
 
-DEBUG = True
+DEBUG = False
 
 # Will error if the minimal version of Transformers is not installed. Remove at your
 # own risks.
@@ -461,7 +461,6 @@ def main(**kwargs):
     predict_dataset, predict_examples = tokenized_datasets.get("test"), examples.get(
         "test"
     )
-    import pdb; pdb.set_trace()
     eval_features = examples["squad"]
 
     # Data collator
@@ -497,7 +496,6 @@ def main(**kwargs):
             )
             for i, p in enumerate(predictions[0])
         ]
-        import pdb; pdb.set_trace()
         # Post-processing: we match the start logits and end
         # logits to answers in the original context.
         my_preds = compute_predictions_logits(
@@ -590,7 +588,6 @@ def main(**kwargs):
     # Evaluation
     if training_args.do_eval and not trainer.one_shot:
         _LOGGER.info("*** Evaluate ***")
-        import pdb; pdb.set_trace()
         metrics = trainer.evaluate()
 
         max_eval_samples = (
@@ -920,14 +917,13 @@ def _get_tokenized_datasets_and_examples(
         return tokenized_examples
 
     if make_eval_dataset:
-        import pdb; pdb.set_trace()
         if data_args.eval_on_test:
             eval_examples = raw_datasets["test"]
-            if DEBUG:
-                my_id = 'LohaCompanyltd_20191209_F-1_EX-10.16_11917878_EX-10.16_Supply Agreement__Agreement Date'
-                ids = [idx for idx in range(len(eval_examples)) if eval_examples[idx]['id'] == my_id]
-                eval_examples = eval_examples.select(ids)
-                assert len(eval_examples) == 1, "Assumption failed"
+            # if DEBUG:
+            #     my_id = 'LohaCompanyltd_20191209_F-1_EX-10.16_11917878_EX-10.16_Supply Agreement__Agreement Date'
+            #     ids = [idx for idx in range(len(eval_examples)) if eval_examples[idx]['id'] == my_id]
+            #     eval_examples = eval_examples.select(ids)
+            #     assert len(eval_examples) == 1, "Assumption failed"
         elif "validation" in raw_datasets:
             eval_examples = raw_datasets["validation"]
         elif data_args.validation_ratio is None:
@@ -972,7 +968,6 @@ def _get_tokenized_datasets_and_examples(
             padding_strategy="max_length",
             threads=data_args.preprocessing_num_workers,
         )
-        import pdb; pdb.set_trace()
         eval_dataset = [
             {
                 "example_id": ex.qas_id,
