@@ -34,6 +34,7 @@ from typing import Optional
 
 import datasets
 import numpy
+import torch
 import transformers
 from datasets import load_dataset, load_metric
 from sklearn.model_selection import StratifiedShuffleSplit
@@ -62,7 +63,11 @@ from sparseml.transformers.sparsification import (
     TrainingArguments,
     postprocess_qa_predictions,
 )
-from sparseml.transformers.utils import SparseAutoModel, get_shared_tokenizer_src
+from sparseml.transformers.utils import (
+    SparseAutoModel,
+    get_shared_tokenizer_src,
+    load_and_cache_features,
+)
 from sparseml.transformers.utils.cuad_eval import CUAD
 
 
@@ -163,6 +168,12 @@ class DataTrainingArguments:
             ),
         },
     )
+    feature_cache_dir: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Directory to cache features",
+        },
+    )
     train_file: Optional[str] = field(
         default=None,
         metadata={"help": "The input training data file (a text file)."},
@@ -192,6 +203,10 @@ class DataTrainingArguments:
     eval_on_test: bool = field(
         default=False,
         metadata={"help": "Evaluate the test dataset."},
+    )
+    cached_test_features: Optional[str] = field(
+        default=None,
+        metadata={"help": "Cached test features, used with eval_on_test."},
     )
     overwrite_cache: bool = field(
         default=False,
@@ -439,11 +454,12 @@ def main(**kwargs):
     #         "https://huggingface.co/transformers/index.html#supported-frameworks to "
     #         "find the model types that meet this requirement"
     #     )
-
     raw_datasets = _get_raw_dataset(data_args=data_args, cache_dir=model_args.cache_dir)
     make_eval_dataset = training_args.do_eval or data_args.num_export_samples > 0
     tokenized_datasets, examples = _get_tokenized_datasets_and_examples(
+        model_args=model_args,
         data_args=data_args,
+        training_args=training_args,
         raw_datasets=raw_datasets,
         tokenizer=tokenizer,
         make_eval_dataset=make_eval_dataset,
@@ -663,7 +679,9 @@ def get_tokenized_qa_dataset(
 
 
 def _get_tokenized_datasets_and_examples(
+    model_args,
     data_args,
+    training_args,
     raw_datasets,
     tokenizer,
     make_eval_dataset: bool = False,
@@ -806,37 +824,18 @@ def _get_tokenized_datasets_and_examples(
             )
         if data_args.max_train_samples is not None:
             # We will select sample from whole data if argument is specified
-            train_dataset = train_examples.select(range(data_args.max_train_samples))
+            train_examples = train_examples.select(range(data_args.max_train_samples))
 
-        examples = []
-        for ex in train_dataset:
-            answers = ex["answers"]
-            can = len(answers["text"]) > 0
-            examples.append(
-                SquadExample(
-                    qas_id=ex["id"],
-                    question_text=ex["question"],
-                    context_text=ex["context"],
-                    answer_text=answers["text"][0] if can else None,
-                    start_position_character=answers["answer_start"][0]
-                    if can
-                    else None,
-                    title=ex["title"],
-                    answers=answers,
-                    is_impossible=not can,
-                )
-            )
-        features, train_dataset = squad_convert_examples_to_features(
-            examples,
+        train_dataset = load_and_cache_features(
+            train_examples,
+            model_args,
+            data_args,
+            training_args,
             tokenizer,
-            data_args.max_seq_length,
-            data_args.doc_stride,
-            max_query_length=64,
-            is_training=True,
-            padding_strategy="max_length",
-            return_dataset="pt",
-            threads=data_args.preprocessing_num_workers,
+            evaluate=False,
+            output_examples=False,
         )
+
         train_dataset = [
             {
                 "input_ids": ex[0],
@@ -847,21 +846,6 @@ def _get_tokenized_datasets_and_examples(
             }
             for ex in train_dataset
         ]
-
-        # Create train feature from dataset
-        # with main_process_func(desc="train dataset map pre-processing"):
-        # train_dataset = train_dataset.map(
-        #     prepare_train_features,
-        #     batched=True,
-        #     num_proc=data_args.preprocessing_num_workers,
-        #     remove_columns=column_names,
-        #     load_from_cache_file=not data_args.overwrite_cache,
-        #     desc="Running tokenizer on train dataset",
-        # )
-        # if data_args.max_train_samples is not None:
-        #     # Number of samples might increase during Feature Creation, We select only
-        #     # specified max samples
-        #     train_dataset = train_dataset.select(range(data_args.max_train_samples))
 
     # Validation preprocessing
     def prepare_validation_features(examples):
@@ -935,35 +919,17 @@ def _get_tokenized_datasets_and_examples(
             # We will select sample from whole data
             eval_examples = eval_examples.select(range(data_args.max_eval_samples))
 
-        squad_examples = []
-        for ex in eval_examples:
-            answers = ex["answers"]
-            can = len(answers["text"]) > 0
-            squad_examples.append(
-                SquadExample(
-                    qas_id=ex["id"],
-                    question_text=ex["question"],
-                    context_text=ex["context"],
-                    answer_text=answers["text"][0] if can else None,
-                    start_position_character=answers["answer_start"][0]
-                    if can
-                    else None,
-                    title=ex["title"],
-                    answers=answers,
-                    is_impossible=not can,
-                )
-            )
-        squad_features, _ = squad_convert_examples_to_features(
-            squad_examples,
+        eval_dataset, eval_examples, eval_features = load_and_cache_features(
+            eval_examples,
+            model_args,
+            data_args,
+            training_args,
             tokenizer,
-            data_args.max_seq_length,
-            data_args.doc_stride,
-            max_query_length=64,
-            is_training=False,
-            return_dataset="pt",
-            padding_strategy="max_length",
-            threads=data_args.preprocessing_num_workers,
+            evaluate=True,
+            eval_on_test=data_args.eval_on_test,
+            output_examples=True,
         )
+
         eval_dataset = [
             {
                 "example_id": ex.qas_id,
@@ -972,23 +938,8 @@ def _get_tokenized_datasets_and_examples(
                 "token_type_ids": ex.token_type_ids,
                 "token_is_max_context": ex.token_is_max_context,
             }
-            for ex in squad_features
+            for ex in eval_features
         ]
-        eval_examples = squad_examples
-        # Validation Feature Creation
-        # with main_process_func(desc="validation dataset map pre-processing"):
-        # eval_dataset = eval_examples.map(
-        #     prepare_validation_features,
-        #     batched=True,
-        #     num_proc=data_args.preprocessing_num_workers,
-        #     remove_columns=column_names,
-        #     load_from_cache_file=not data_args.overwrite_cache,
-        #     desc="Running tokenizer on validation dataset",
-        # )
-        # if data_args.max_eval_samples is not None:
-        #     # During Feature creation dataset samples might increase, we will select
-        #     # required samples again
-        #     eval_dataset = eval_dataset.select(range(data_args.max_eval_samples))
 
     predict_examples = None
     if do_predict:
@@ -1027,7 +978,7 @@ def _get_tokenized_datasets_and_examples(
         "train": None,
         "validation": eval_examples,
         "test": predict_examples,
-        "squad": squad_features,
+        "squad": eval_features,
     }
     return tokenized_datasets, examples
 
@@ -1053,24 +1004,17 @@ def _post_split(train_ds, val_ds, data_args):
 
 
 def _split_train_val(train_dataset, val_ratio, data_args):
-
     train_dataset = _pre_split(train_dataset, data_args)
 
     # Fixed random seed to make split consistent across runs with the same ratio
     seed = 42
-    try:
-        ds = train_dataset.train_test_split(
-            test_size=val_ratio, stratify_by_column="category", seed=seed
-        )
-        train_ds = ds.pop("train")
-        val_ds = ds.pop("test")
-    except TypeError:
-        X = list(range(len(train_dataset)))
-        y = train_dataset["category"]
-        sss = StratifiedShuffleSplit(n_splits=1, test_size=val_ratio, random_state=seed)
-        for train_indices, test_indices in sss.split(X, y):
-            train_ds = train_dataset.select(train_indices)
-            val_ds = train_dataset.select(test_indices)
+
+    X = list(range(len(train_dataset)))
+    y = train_dataset["category"]
+    sss = StratifiedShuffleSplit(n_splits=1, test_size=val_ratio, random_state=seed)
+    for train_indices, test_indices in sss.split(X, y):
+        train_ds = train_dataset.select(train_indices)
+        val_ds = train_dataset.select(test_indices)
 
     train_ds, val_ds = _post_split(train_ds, val_ds, data_args)
 
