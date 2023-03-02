@@ -733,7 +733,7 @@ def get_dataset_pos_mask(dataset):
     return pos_mask
 
 
-def get_balanced_dataset(dataset):
+def get_balanced_dataset(dataset, neg_to_pos_ratio=1.0):
     """
     returns a new dataset, where positive and negative examples are approximately balanced
     """
@@ -742,7 +742,7 @@ def get_balanced_dataset(dataset):
     npos, nneg = np.sum(pos_mask), np.sum(neg_mask)
 
     neg_keep_frac = (
-        npos / nneg
+        neg_to_pos_ratio * npos / nneg
     )  # So that in expectation there will be npos negative examples (--> balanced)
     neg_keep_mask = [mask and np.random.random() < neg_keep_frac for mask in neg_mask]
 
@@ -783,14 +783,14 @@ def load_and_cache_features(
         cached_features_file = os.path.join(
             feature_cache_dir,
             "cached_{}_{}".format(
-                "dev" if evaluate else "train",
+                f"dev@{data_args.validation_ratio}" if evaluate else "train",
                 str(data_args.max_seq_length),
             ),
         )
     subset_cached_features_file = os.path.join(
         feature_cache_dir,
         "balanced_subset_cached_{}_{}".format(
-            "dev" if evaluate else "train",
+            "dev" if evaluate else f"train_{data_args.neg_to_pos_ratio}x",
             str(data_args.max_seq_length),
         ),
     )
@@ -813,7 +813,10 @@ def load_and_cache_features(
             )
         else:
             dataset = features_and_dataset["dataset"]
-            dataset = get_balanced_dataset(dataset)
+            dataset = get_balanced_dataset(
+                dataset,
+                neg_to_pos_ratio=data_args.neg_to_pos_ratio
+            )
             if training_args.local_rank in [-1, 0]:
                 logger.info(
                     "Saving balanced dataset into cached file %s",
@@ -862,7 +865,7 @@ def load_and_cache_features(
                     cached_features_file,
                 )
         else:
-            dataset = get_balanced_dataset(dataset)
+            dataset = get_balanced_dataset(dataset, neg_to_pos_ratio=data_args.neg_to_pos_ratio)
             if training_args.local_rank in [-1, 0]:
                 logger.info(
                     "Saving balanced dataset into cached file %s",

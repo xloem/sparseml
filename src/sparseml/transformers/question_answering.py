@@ -196,6 +196,10 @@ class DataTrainingArguments:
             ),
         },
     )
+    neg_to_pos_ratio: Optional[float] = field(
+        default=1.0,
+        metadata={"help": "Ratio of negative to positive samples after balancing."},
+    )
     validation_ratio: Optional[float] = field(
         default=None,
         metadata={"help": "Percentage of the training data to be used as validation."},
@@ -417,7 +421,6 @@ def main(**kwargs):
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-
     model, teacher = SparseAutoModel.question_answering_from_pretrained_distil(
         model_name_or_path=model_args.model_name_or_path,
         model_kwargs={
@@ -432,7 +435,6 @@ def main(**kwargs):
             "use_auth_token": True if model_args.use_auth_token else None,
         },
     )
-
     tokenizer_src = (
         model_args.tokenizer_name
         if model_args.tokenizer_name
@@ -817,8 +819,9 @@ def _get_tokenized_datasets_and_examples(
         if (
             make_eval_dataset
             and "validation" not in raw_datasets
-            and data_args.validation_ratio is not None
+            and data_args.validation_ratio is not None and data_args.validation_ratio > 0
         ):
+            assert False, "Dont want to split"
             train_examples, eval_examples = _split_train_val(
                 train_examples, data_args.validation_ratio, data_args
             )
@@ -906,6 +909,9 @@ def _get_tokenized_datasets_and_examples(
             eval_examples = raw_datasets["test"]
         elif "validation" in raw_datasets:
             eval_examples = raw_datasets["validation"]
+        elif data_args.feature_cache_dir is not None:
+            # Eval examples expected to be loaded from cached file later
+            eval_examples = None
         elif data_args.validation_ratio is None:
             raise ValueError(
                 "--do_eval requires a validation dataset or validation_ratio specified"
@@ -1030,7 +1036,10 @@ def _get_column_names(
     if do_train:
         column_names = raw_datasets["train"].column_names
     elif make_eval_dataset and not eval_on_test:
-        column_names = raw_datasets["validation"].column_names
+        if "validation" in raw_datasets:
+            column_names = raw_datasets["validation"].column_names
+        else:
+            column_names = raw_datasets["train"].column_names
     else:
         column_names = raw_datasets["test"].column_names
     return column_names
