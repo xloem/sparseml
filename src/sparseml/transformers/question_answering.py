@@ -819,9 +819,8 @@ def _get_tokenized_datasets_and_examples(
         if (
             make_eval_dataset
             and "validation" not in raw_datasets
-            and data_args.validation_ratio is not None and data_args.validation_ratio > 0
+            and data_args.validation_ratio is not None
         ):
-            assert False, "Dont want to split"
             train_examples, eval_examples = _split_train_val(
                 train_examples, data_args.validation_ratio, data_args
             )
@@ -909,9 +908,6 @@ def _get_tokenized_datasets_and_examples(
             eval_examples = raw_datasets["test"]
         elif "validation" in raw_datasets:
             eval_examples = raw_datasets["validation"]
-        elif data_args.feature_cache_dir is not None:
-            # Eval examples expected to be loaded from cached file later
-            eval_examples = None
         elif data_args.validation_ratio is None:
             raise ValueError(
                 "--do_eval requires a validation dataset or validation_ratio specified"
@@ -946,7 +942,6 @@ def _get_tokenized_datasets_and_examples(
             }
             for ex in eval_features
         ]
-
     predict_examples = None
     if do_predict:
         if "test" not in raw_datasets:
@@ -1036,10 +1031,7 @@ def _get_column_names(
     if do_train:
         column_names = raw_datasets["train"].column_names
     elif make_eval_dataset and not eval_on_test:
-        if "validation" in raw_datasets:
-            column_names = raw_datasets["validation"].column_names
-        else:
-            column_names = raw_datasets["train"].column_names
+        column_names = raw_datasets["validation"].column_names
     else:
         column_names = raw_datasets["test"].column_names
     return column_names

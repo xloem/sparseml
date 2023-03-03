@@ -571,7 +571,6 @@ def get_tokenized_mlm_dataset(
         else nullcontext(desc)
     )
     do_train = training_args.do_train if training_args else False
-
     tokenized_datasets = _get_tokenized_mlm_dataset_from_raw_dataset(
         raw_datasets=raw_datasets,
         tokenizer=tokenizer,
@@ -595,7 +594,10 @@ def _get_tokenized_mlm_dataset_from_raw_dataset(
         column_names = raw_datasets["train"].column_names
     else:
         column_names = raw_datasets["validation"].column_names
-    text_column_name = "text" if "text" in column_names else column_names[0]
+    if data_args.dataset_name == "cuad":
+        text_column_name = "context"
+    else:
+        text_column_name = "text" if "text" in column_names else column_names[0]
     if data_args.max_seq_length is None:
         max_seq_length = tokenizer.model_max_length
         if max_seq_length > 1024:

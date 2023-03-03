@@ -772,6 +772,10 @@ def load_and_cache_features(
     feature_cache_dir = (
         data_args.feature_cache_dir if data_args.feature_cache_dir else "."
     )
+    if data_args.validation_ratio is None or data_args.validation_ratio < 0:
+        val_ratio = 0
+    else:
+        val_ratio = data_args.validation_ratio
     if eval_on_test:
         cached_features_file = os.path.join(
             feature_cache_dir,
@@ -782,16 +786,20 @@ def load_and_cache_features(
     else:
         cached_features_file = os.path.join(
             feature_cache_dir,
-            "cached_{}_{}".format(
-                f"dev@{data_args.validation_ratio}" if evaluate else "train",
+            "cached_val{}_r{}x_{}_{}".format(
+                val_ratio,
+                data_args.neg_to_pos_ratio,
+                "dev" if evaluate else "train",
                 str(data_args.max_seq_length),
             ),
         )
     subset_cached_features_file = os.path.join(
         feature_cache_dir,
-        "balanced_subset_cached_{}_{}".format(
-            "dev" if evaluate else f"train_{data_args.neg_to_pos_ratio}x",
-            str(data_args.max_seq_length),
+        "balanced_subset_cached_val{}_r{}x_{}_{}".format(
+            val_ratio,
+            data_args.neg_to_pos_ratio,
+            "dev" if evaluate else "train",
+            str(data_args.max_seq_length)
         ),
     )
 
