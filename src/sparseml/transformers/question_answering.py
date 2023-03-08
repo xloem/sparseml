@@ -766,7 +766,7 @@ def _get_tokenized_datasets_and_examples(
         if (
             make_eval_dataset
             and "validation" not in raw_datasets
-            and data_args.validation_ratio is not None
+            and data_args.validation_ratio is not None and data_args.validation_ratio > 0
         ):
             train_examples, eval_examples = _split_train_val(
                 train_examples, data_args.validation_ratio, data_args
@@ -953,24 +953,18 @@ def _post_split(train_ds, val_ds, data_args):
 
 
 def _split_train_val(train_dataset, val_ratio, data_args):
-    assert val_ratio is not None
+    assert val_ratio is not None and val_ratio > 0
     train_dataset = _pre_split(train_dataset, data_args)
 
     # Fixed random seed to make split consistent across runs with the same ratio
     seed = 42
-    try:
-        ds = train_dataset.train_test_split(
-            test_size=val_ratio, stratify_by_column="category", seed=seed
-        )
-        train_ds = ds.pop("train")
-        val_ds = ds.pop("test")
-    except TypeError:
-        X = list(range(len(train_dataset)))
-        y = train_dataset["category"]
-        sss = StratifiedShuffleSplit(n_splits=1, test_size=val_ratio, random_state=seed)
-        for train_indices, test_indices in sss.split(X, y):
-            train_ds = train_dataset.select(train_indices)
-            val_ds = train_dataset.select(test_indices)
+
+    X = list(range(len(train_dataset)))
+    y = train_dataset["category"]
+    sss = StratifiedShuffleSplit(n_splits=1, test_size=val_ratio, random_state=seed)
+    for train_indices, test_indices in sss.split(X, y):
+        train_ds = train_dataset.select(train_indices)
+        val_ds = train_dataset.select(test_indices)
 
     train_ds, val_ds = _post_split(train_ds, val_ds, data_args)
 
