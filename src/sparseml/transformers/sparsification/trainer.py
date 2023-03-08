@@ -379,7 +379,7 @@ class RecipeManagerTrainerInterface:
         student_inputs = {
             k: inputs[k] for k in inputs if k in self._model_signature_columns
         }
-        student_outputs = model(**student_inputs)
+        student_outputs = model(**student_inputs, output_hidden_states=True)
         if any(_get_teacher_base_column_name(column) for column in inputs):
             # inputs from teacher tokenizer available
             teacher_inputs = {}
@@ -400,7 +400,19 @@ class RecipeManagerTrainerInterface:
             # pass all inputs
             teacher_inputs = None
 
-        loss = student_outputs["loss"]
+        lbl = student_inputs["labels"]
+        rolled_lbl = torch.roll(lbl, shifts=1, dims=0)
+
+        embeddings = student_outputs["hidden_states"][-1].view(lbl.shape[0], -1)
+        rolled_embeddings = torch.roll(embeddings, shifts=1, dims=1)
+
+        sign = 2.0 * (lbl == rolled_lbl).to(embeddings.dtype) - 1.0
+
+        cosine_similarity = torch.nn.CosineEmbeddingLoss()
+
+        contrastive_loss = cosine_similarity(embeddings, rolled_embeddings, sign)
+
+        loss = 0.5 * student_outputs["loss"] + 0.5 * contrastive_loss
         if self.args.n_gpu > 1:  # DataParallel
             loss = loss.mean()
         loss = self.manager.loss_update(
