@@ -5,6 +5,8 @@ Generate sample dataset by running `python download_sst2.py`. Generates full val
 and sample of 8 training examples per class by default.
 
 ## Example Command
+
+```bash
 sparseml.transformers.train.text_classification \
   --output_dir tmp-constrastive \
   --model_name_or_path zoo:nlp/masked_language_modeling/obert-base/pytorch/huggingface/wikipedia_bookcorpus/pruned90-none \
@@ -17,3 +19,4 @@ sparseml.transformers.train.text_classification \
   --validation_file sst2-validation.csv \
   --input_column_names sentence \
   --label_column_name label
+```
