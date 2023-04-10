@@ -128,6 +128,14 @@ def load_task_model(task: str, model_path: str, config: Any) -> Module:
             model_type="model",
         )
 
+    if task == "text-generation":
+        return SparseAutoModel.text_generation_from_pretrained(
+            model_name_or_path=model_path,
+            config=config,
+            model_type="model",
+            device_map='auto',
+        )
+
     if task == "token-classification" or task == "ner":
         return SparseAutoModel.token_classification_from_pretrained(
             model_name_or_path=model_path,
@@ -186,6 +194,7 @@ def load_task_dataset(
         or task == "glue"
         or task == "sentiment-analysis"
         or task == "text-classification"
+        or task == "text-generation"
     ):
 
         from sparseml.transformers.text_classification import (
@@ -310,6 +319,8 @@ def export_transformer_to_onnx(
         _LOGGER.info(f"Applied {msg} to the model at {model_path}")
 
     # create fake model input
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
     inputs = tokenizer(
         "", return_tensors="pt", padding=PaddingStrategy.MAX_LENGTH.value
     ).data  # Dict[Tensor]
